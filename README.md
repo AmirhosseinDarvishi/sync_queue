@@ -61,6 +61,13 @@ engine.watchEntityState(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
   (state) => print(state.status),
 );
 
+await engine.resolveConflict(
+  'operation-1',
+  const SyncConflictResolution.retry(
+    payload: {'title': 'Merged title'},
+  ),
+);
+
 final encoded = (await store.readAll()).map((record) => record.toJson());
 ```
 

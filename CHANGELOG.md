@@ -3,6 +3,7 @@
 * Add a JSON-backed sync store adapter.
 * Add engine-generated operation ids for common enqueue flows.
 * Add aggregated entity sync state helpers for UI.
+* Add conflict resolution helpers for retry, discard, and fail decisions.
 
 ## 0.1.0-dev.1
 

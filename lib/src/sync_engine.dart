@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'models/sync_conflict_resolution.dart';
 import 'models/sync_entity_ref.dart';
 import 'models/sync_entity_state.dart';
 import 'models/sync_failure.dart';
@@ -107,6 +108,72 @@ class SyncEngine {
     return enqueue(operation, syncImmediately: syncImmediately);
   }
 
+  /// Resolves a conflicted operation using an app-provided decision.
+  ///
+  /// Returns `null` when the operation is no longer in the queue.
+  Future<SyncRecord?> resolveConflict(
+    String operationId,
+    SyncConflictResolution resolution, {
+    bool syncImmediately = true,
+  }) async {
+    final record = await store.read(operationId);
+    if (record == null) {
+      return null;
+    }
+
+    if (record.status != SyncStatus.conflicted) {
+      throw StateError('Operation "$operationId" is not conflicted.');
+    }
+
+    switch (resolution) {
+      case SyncConflictRetry(
+        :final payload,
+        :final headers,
+        :final resetAttempts,
+      ):
+        final pending = record.copyWith(
+          operation: record.operation.copyWith(
+            payload: payload ?? record.operation.payload,
+            headers: headers ?? record.operation.headers,
+          ),
+          status: SyncStatus.pending,
+          attempts: resetAttempts ? 0 : record.attempts,
+          clearNextAttemptAt: true,
+          clearLastFailure: true,
+          clearConflict: true,
+          updatedAt: _clock(),
+        );
+        await _saveAndEmit(pending);
+
+        if (syncImmediately) {
+          await drain();
+        }
+
+        return pending;
+      case SyncConflictDiscard():
+        final synced = record.copyWith(
+          status: SyncStatus.synced,
+          clearNextAttemptAt: true,
+          clearLastFailure: true,
+          clearConflict: true,
+          updatedAt: _clock(),
+        );
+        await store.delete(operationId);
+        _emit(synced);
+        return synced;
+      case SyncConflictFail(:final failure):
+        final failed = record.copyWith(
+          status: SyncStatus.failed,
+          lastFailure: failure,
+          clearNextAttemptAt: true,
+          clearConflict: true,
+          updatedAt: _clock(),
+        );
+        await _saveAndEmit(failed);
+        return failed;
+    }
+  }
+
   /// Sends due operations until the queue is caught up for the current moment.
   Future<void> drain({bool force = false}) async {
     if (_isDisposed || _isDraining) {
@@ -172,8 +239,8 @@ class SyncEngine {
           clearConflict: true,
           updatedAt: _clock(),
         );
-        _events.add(synced);
         await store.delete(attempt.operation.id);
+        _emit(synced);
       case SyncFailureResult(:final failure):
         await _handleFailure(attempt, failure);
       case SyncConflict():
@@ -215,6 +282,10 @@ class SyncEngine {
 
   Future<void> _saveAndEmit(SyncRecord record) async {
     await store.put(record);
+    _emit(record);
+  }
+
+  void _emit(SyncRecord record) {
     if (!_isDisposed) {
       _events.add(record);
     }

@@ -485,4 +485,138 @@ void main() {
 
     await engine.dispose();
   });
+
+  test('conflict retry updates operation and returns it to pending', () async {
+    var sendCount = 0;
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((operation) async {
+      sendCount += 1;
+      if (sendCount == 1) {
+        return const SyncResult.conflict(
+          message: 'Server version changed',
+          local: <String, Object?>{'title': 'Local'},
+          remote: <String, Object?>{'title': 'Remote'},
+        );
+      }
+
+      return const SyncResult.success();
+    });
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final conflicted = (await store.readAll()).single;
+    expect(conflicted.status, SyncStatus.conflicted);
+    expect(conflicted.attempts, 1);
+
+    final resolved = await engine.resolveConflict(
+      'op-1',
+      const SyncConflictResolution.retry(
+        payload: <String, Object?>{'title': 'Merged'},
+      ),
+      syncImmediately: false,
+    );
+
+    expect(resolved?.status, SyncStatus.pending);
+    expect(resolved?.attempts, 0);
+    expect(resolved?.conflict, isNull);
+    expect(resolved?.operation.payload, const <String, Object?>{
+      'title': 'Merged',
+    });
+
+    await engine.drain();
+
+    expect(transport.sent, hasLength(2));
+    expect(transport.sent.last.payload, const <String, Object?>{
+      'title': 'Merged',
+    });
+    expect(await store.readAll(), isEmpty);
+    await engine.dispose();
+  });
+
+  test('conflict discard removes local operation and emits synced', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport(
+      (_) async => const SyncResult.conflict(message: 'Server wins'),
+    );
+    final engine = SyncEngine(store: store, transport: transport);
+    final emitted = <SyncStatus>[];
+    final subscription = engine.events.listen(
+      (record) => emitted.add(record.status),
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final resolved = await engine.resolveConflict(
+      'op-1',
+      const SyncConflictResolution.discard(),
+    );
+
+    expect(resolved?.status, SyncStatus.synced);
+    expect(await store.readAll(), isEmpty);
+    expect(emitted, contains(SyncStatus.synced));
+
+    await subscription.cancel();
+    await engine.dispose();
+  });
+
+  test('conflict fail keeps operation with final failure', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport(
+      (_) async => const SyncResult.conflict(message: 'Cannot merge'),
+    );
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final resolved = await engine.resolveConflict(
+      'op-1',
+      const SyncConflictResolution.fail(
+        SyncFailure(
+          message: 'Manual merge rejected',
+          code: 'merge_rejected',
+          isRetryable: false,
+        ),
+      ),
+    );
+    final record = (await store.readAll()).single;
+
+    expect(resolved?.status, SyncStatus.failed);
+    expect(record.status, SyncStatus.failed);
+    expect(record.conflict, isNull);
+    expect(record.lastFailure?.code, 'merge_rejected');
+    expect(record.lastFailure?.isRetryable, isFalse);
+
+    await engine.dispose();
+  });
+
+  test('conflict resolution rejects non-conflicted operations', () async {
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+
+    expect(
+      () => engine.resolveConflict(
+        'op-1',
+        const SyncConflictResolution.discard(),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      await engine.resolveConflict(
+        'missing',
+        const SyncConflictResolution.discard(),
+      ),
+      isNull,
+    );
+
+    await engine.dispose();
+  });
 }
