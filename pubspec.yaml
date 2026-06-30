@@ -1,8 +1,8 @@
-name: local_first_sync_kit
+name: sync_queue
 description: "A local-first sync queue for Flutter apps with retries, conflict hooks, and UI-friendly sync status."
 version: 0.0.1
-repository: https://github.com/AmirhosseinDarvishi/local_first_sync_kit
-issue_tracker: https://github.com/AmirhosseinDarvishi/local_first_sync_kit/issues
+repository: https://github.com/AmirhosseinDarvishi/sync_queue
+issue_tracker: https://github.com/AmirhosseinDarvishi/sync_queue/issues
 topics:
   - flutter
   - offline-first
