@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:offline_sync_kit/offline_sync_kit.dart';
+import 'package:local_first_sync_kit/local_first_sync_kit.dart';
 
 class FakeTransport implements SyncTransport {
   FakeTransport(this.handler);

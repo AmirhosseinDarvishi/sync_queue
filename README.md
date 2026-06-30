@@ -1,4 +1,4 @@
-# offline_sync_kit
+# local_first_sync_kit
 
 A local-first sync queue for Flutter apps. The package starts with a small,
 testable core for durable operations, retry backoff, conflict surfacing, and
