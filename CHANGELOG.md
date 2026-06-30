@@ -1,3 +1,7 @@
+## Unreleased
+
+* Add a JSON-backed sync store adapter.
+
 ## 0.1.0-dev.1
 
 * Add the initial sync queue core.

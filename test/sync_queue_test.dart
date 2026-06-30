@@ -307,4 +307,75 @@ void main() {
       throwsA(isA<FormatException>()),
     );
   });
+
+  test('JSON sync store persists records through JSON storage', () async {
+    final storage = InMemorySyncJsonStorage();
+    final store = JsonSyncStore(storage);
+    final older = SyncRecord(
+      operation: operation(id: 'older', createdAt: DateTime.utc(2026)),
+    );
+    final newer = SyncRecord(
+      operation: operation(id: 'newer', createdAt: DateTime.utc(2026, 1, 2)),
+      attempts: 1,
+      lastFailure: const SyncFailure(message: 'Try again'),
+    );
+
+    await store.put(newer);
+    await store.put(older);
+
+    final records = await store.readAll();
+    expect(records.map((record) => record.operation.id), <String>[
+      'older',
+      'newer',
+    ]);
+
+    final restored = await store.read('newer');
+    expect(restored?.attempts, 1);
+    expect(restored?.lastFailure?.message, 'Try again');
+    expect(await storage.read('newer'), isNotNull);
+
+    await store.delete('newer');
+
+    expect(await store.read('newer'), isNull);
+    expect(await storage.read('newer'), isNull);
+  });
+
+  test('JSON sync store reads only due pending records', () async {
+    final store = JsonSyncStore(InMemorySyncJsonStorage());
+    final dueAt = DateTime.utc(2026, 6, 30, 12);
+    final due = SyncRecord(
+      operation: operation(id: 'due', createdAt: DateTime.utc(2026)),
+      nextAttemptAt: dueAt,
+    );
+    final future = SyncRecord(
+      operation: operation(id: 'future', createdAt: DateTime.utc(2026, 1, 2)),
+      nextAttemptAt: dueAt.add(const Duration(minutes: 1)),
+    );
+    final failed = SyncRecord(
+      operation: operation(id: 'failed', createdAt: DateTime.utc(2026, 1, 3)),
+      status: SyncStatus.failed,
+    );
+
+    await store.put(future);
+    await store.put(failed);
+    await store.put(due);
+
+    final pending = await store.readPending(dueAt: dueAt);
+
+    expect(pending.map((record) => record.operation.id), <String>['due']);
+  });
+
+  test('sync engine can drain with a JSON sync store', () async {
+    final store = JsonSyncStore(InMemorySyncJsonStorage());
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    expect(transport.sent, hasLength(1));
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+  });
 }

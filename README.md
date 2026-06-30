@@ -13,6 +13,7 @@ UI-friendly status streams.
 - Pause automatic draining while offline.
 - Drain pending operations when connectivity returns.
 - Serialize operations and records for durable stores.
+- Adapt any JSON-capable persistence layer through `JsonSyncStore`.
 - Surface conflicts instead of hiding them.
 - Watch per-entity sync status from Flutter UI.
 

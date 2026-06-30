@@ -7,6 +7,7 @@ export 'src/models/sync_record.dart';
 export 'src/models/sync_result.dart';
 export 'src/retry_policy.dart';
 export 'src/stores/in_memory_sync_store.dart';
+export 'src/stores/json_sync_store.dart';
 export 'src/sync_connectivity.dart';
 export 'src/sync_engine.dart';
 export 'src/sync_json.dart' show SyncJsonMap;
