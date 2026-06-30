@@ -1,6 +1,7 @@
 ## Unreleased
 
 * Add a JSON-backed sync store adapter.
+* Add engine-generated operation ids for common enqueue flows.
 
 ## 0.1.0-dev.1
 

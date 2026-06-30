@@ -11,5 +11,6 @@ export 'src/stores/json_sync_store.dart';
 export 'src/sync_connectivity.dart';
 export 'src/sync_engine.dart';
 export 'src/sync_json.dart' show SyncJsonMap;
+export 'src/sync_operation_id_generator.dart';
 export 'src/sync_store.dart';
 export 'src/sync_transport.dart';

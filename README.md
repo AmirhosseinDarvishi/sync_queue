@@ -43,6 +43,12 @@ await engine.enqueue(
   ),
 );
 
+await engine.enqueueMutation(
+  entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+  type: SyncOperationType.update,
+  payload: const {'title': 'Generated operation id'},
+);
+
 engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
   (record) {
     // pending, syncing, synced, failed, or conflicted

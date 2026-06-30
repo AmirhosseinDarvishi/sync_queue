@@ -39,6 +39,34 @@ void main() {
     await engine.dispose();
   });
 
+  test('enqueue mutation generates operation ids through the engine', () async {
+    final now = DateTime.utc(2026, 6, 30, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      operationIdGenerator: () => 'generated-op',
+      clock: () => now,
+    );
+
+    await engine.enqueueMutation(
+      entity: const SyncEntityRef(type: 'task', id: 'task-generated'),
+      type: SyncOperationType.update,
+      payload: const <String, Object?>{'title': 'Generated'},
+      syncImmediately: false,
+    );
+
+    final record = (await store.readAll()).single;
+    expect(record.operation.id, 'generated-op');
+    expect(record.operation.createdAt, now);
+    expect(record.operation.entity.id, 'task-generated');
+    expect(record.operation.payload, const <String, Object?>{
+      'title': 'Generated',
+    });
+    await engine.dispose();
+  });
+
   test('drain sends due operations and removes successful records', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());
