@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'models/sync_entity_ref.dart';
+import 'models/sync_entity_state.dart';
 import 'models/sync_failure.dart';
 import 'models/sync_operation.dart';
 import 'models/sync_record.dart';
@@ -52,6 +53,24 @@ class SyncEngine {
   /// Emits transitions for a specific domain entity.
   Stream<SyncRecord> watchEntity(SyncEntityRef entity) {
     return events.where((record) => record.operation.entity == entity);
+  }
+
+  /// Reads an aggregated state snapshot for one entity.
+  Future<SyncEntityState> readEntityState(SyncEntityRef entity) async {
+    final records = await store.readAll();
+    return SyncEntityState.fromRecords(
+      entity,
+      records.where((record) => record.operation.entity == entity),
+    );
+  }
+
+  /// Emits an initial entity state, then emits a fresh snapshot on each change.
+  Stream<SyncEntityState> watchEntityState(SyncEntityRef entity) async* {
+    yield await readEntityState(entity);
+
+    await for (final _ in watchEntity(entity)) {
+      yield await readEntityState(entity);
+    }
   }
 
   /// Adds an operation to the durable queue.
