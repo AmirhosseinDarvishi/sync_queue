@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sync_queue/sync_queue.dart';
 
@@ -11,6 +13,46 @@ class FakeTransport implements SyncTransport {
   Future<SyncResult> send(SyncOperation operation) async {
     sent.add(operation);
     return handler(operation);
+  }
+}
+
+class FakeTimer implements Timer {
+  FakeTimer(this.duration, this._callback);
+
+  final Duration duration;
+  final void Function() _callback;
+  var _isActive = true;
+  var _tick = 0;
+
+  @override
+  bool get isActive => _isActive;
+
+  @override
+  int get tick => _tick;
+
+  @override
+  void cancel() {
+    _isActive = false;
+  }
+
+  void fire() {
+    if (!_isActive) {
+      return;
+    }
+
+    _isActive = false;
+    _tick += 1;
+    _callback();
+  }
+}
+
+class FakeTimerFactory {
+  final timers = <FakeTimer>[];
+
+  Timer call(Duration duration, void Function() callback) {
+    final timer = FakeTimer(duration, callback);
+    timers.add(timer);
+    return timer;
   }
 }
 
@@ -118,6 +160,78 @@ void main() {
     await engine.drain();
     expect(transport.sent, hasLength(1));
 
+    now = now.add(const Duration(seconds: 5));
+    await engine.drain();
+    expect(transport.sent, hasLength(2));
+    await engine.dispose();
+  });
+
+  test(
+    'retryable failures automatically drain when retry timer fires',
+    () async {
+      var now = DateTime(2026);
+      var attempts = 0;
+      final timers = FakeTimerFactory();
+      final store = InMemorySyncStore();
+      final transport = FakeTransport((_) async {
+        attempts += 1;
+        if (attempts == 1) {
+          return const SyncResult.failure(
+            SyncFailure(message: 'Network unavailable'),
+          );
+        }
+
+        return const SyncResult.success();
+      });
+      final engine = SyncEngine(
+        store: store,
+        transport: transport,
+        retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+        timerFactory: timers.call,
+        clock: () => now,
+      );
+
+      await engine.enqueue(operation(), syncImmediately: false);
+      await engine.drain();
+
+      expect(transport.sent, hasLength(1));
+      expect(timers.timers, hasLength(1));
+      expect(timers.timers.single.duration, const Duration(seconds: 5));
+
+      final synced = engine.events.firstWhere(
+        (record) => record.status == SyncStatus.synced,
+      );
+      now = now.add(const Duration(seconds: 5));
+      timers.timers.single.fire();
+      await synced;
+
+      expect(transport.sent, hasLength(2));
+      expect(await store.readAll(), isEmpty);
+      await engine.dispose();
+    },
+  );
+
+  test('retry scheduling can be disabled for external schedulers', () async {
+    var now = DateTime(2026);
+    final timers = FakeTimerFactory();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport(
+      (_) async =>
+          const SyncResult.failure(SyncFailure(message: 'Network unavailable')),
+    );
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+      autoDrainOnRetry: false,
+      timerFactory: timers.call,
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    expect(timers.timers, isEmpty);
     now = now.add(const Duration(seconds: 5));
     await engine.drain();
     expect(transport.sent, hasLength(2));

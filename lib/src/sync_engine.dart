@@ -15,6 +15,10 @@ import 'sync_transport.dart';
 
 typedef Clock = DateTime Function();
 
+/// Creates timers used by [SyncEngine] for scheduled retries.
+typedef SyncTimerFactory =
+    Timer Function(Duration duration, void Function() callback);
+
 /// Coordinates queue persistence, retries, conflict surfacing, and UI status.
 class SyncEngine {
   SyncEngine({
@@ -24,8 +28,11 @@ class SyncEngine {
     this.operationIdGenerator = SyncOperationIds.generate,
     this.retryPolicy = const RetryPolicy(),
     this.autoDrainOnConnectivityRestored = true,
+    this.autoDrainOnRetry = true,
+    SyncTimerFactory? timerFactory,
     Clock? clock,
   }) : connectivity = connectivity ?? const AlwaysOnlineSyncConnectivity(),
+       _timerFactory = timerFactory ?? Timer.new,
        _clock = clock ?? DateTime.now {
     if (autoDrainOnConnectivityRestored) {
       _connectivitySubscription = this.connectivity.changes.listen((status) {
@@ -33,6 +40,10 @@ class SyncEngine {
           unawaited(drain());
         }
       });
+    }
+
+    if (autoDrainOnRetry) {
+      unawaited(_scheduleNextPendingDrain());
     }
   }
 
@@ -42,9 +53,13 @@ class SyncEngine {
   final SyncOperationIdGenerator operationIdGenerator;
   final RetryPolicy retryPolicy;
   final bool autoDrainOnConnectivityRestored;
+  final bool autoDrainOnRetry;
+  final SyncTimerFactory _timerFactory;
   final Clock _clock;
   final _events = StreamController<SyncRecord>.broadcast();
   StreamSubscription<SyncConnectivityStatus>? _connectivitySubscription;
+  Timer? _retryTimer;
+  DateTime? _scheduledRetryAt;
   var _isDraining = false;
   var _isDisposed = false;
 
@@ -194,12 +209,14 @@ class SyncEngine {
       }
     } finally {
       _isDraining = false;
+      await _scheduleNextPendingDrain();
     }
   }
 
   Future<void> dispose() async {
     _isDisposed = true;
     await _connectivitySubscription?.cancel();
+    _cancelRetryTimer();
     await _events.close();
   }
 
@@ -278,6 +295,7 @@ class SyncEngine {
       updatedAt: _clock(),
     );
     await _saveAndEmit(pending);
+    _scheduleRetryAt(retryAt);
   }
 
   Future<void> _saveAndEmit(SyncRecord record) async {
@@ -289,5 +307,70 @@ class SyncEngine {
     if (!_isDisposed) {
       _events.add(record);
     }
+  }
+
+  Future<void> _scheduleNextPendingDrain() async {
+    if (!autoDrainOnRetry || _isDisposed) {
+      return;
+    }
+
+    final records = await store.readAll();
+    DateTime? nextAttemptAt;
+
+    for (final record in records) {
+      if (record.status != SyncStatus.pending) {
+        continue;
+      }
+
+      final attemptAt = record.nextAttemptAt;
+      if (attemptAt == null) {
+        continue;
+      }
+
+      if (nextAttemptAt == null || attemptAt.isBefore(nextAttemptAt)) {
+        nextAttemptAt = attemptAt;
+      }
+    }
+
+    if (nextAttemptAt == null) {
+      _cancelRetryTimer();
+      return;
+    }
+
+    _scheduleRetryAt(nextAttemptAt);
+  }
+
+  void _scheduleRetryAt(DateTime retryAt) {
+    if (!autoDrainOnRetry || _isDisposed) {
+      return;
+    }
+
+    final scheduled = _scheduledRetryAt;
+    final activeTimer = _retryTimer;
+    if (scheduled != null &&
+        activeTimer != null &&
+        activeTimer.isActive &&
+        !retryAt.isBefore(scheduled)) {
+      return;
+    }
+
+    _cancelRetryTimer();
+
+    final now = _clock();
+    final delay = retryAt.isAfter(now)
+        ? retryAt.difference(now)
+        : Duration.zero;
+    _scheduledRetryAt = retryAt;
+    _retryTimer = _timerFactory(delay, () {
+      _retryTimer = null;
+      _scheduledRetryAt = null;
+      unawaited(drain());
+    });
+  }
+
+  void _cancelRetryTimer() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _scheduledRetryAt = null;
   }
 }
