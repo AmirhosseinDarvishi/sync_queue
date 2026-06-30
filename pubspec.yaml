@@ -1,7 +1,6 @@
 name: offline_sync_kit
 description: "A local-first sync queue for Flutter apps with retries, conflict hooks, and UI-friendly sync status."
 version: 0.0.1
-homepage:
 
 environment:
   sdk: ^3.12.1

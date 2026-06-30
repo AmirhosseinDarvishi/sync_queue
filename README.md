@@ -1,39 +1,54 @@
-<!--
-This README describes the package. If you publish this package to pub.dev,
-this README's contents appear on the landing page for your package.
+# offline_sync_kit
 
-For information about how to write a good package README, see the guide for
-[writing package pages](https://dart.dev/tools/pub/writing-package-pages).
-
-For general information about developing packages, see the Dart guide for
-[creating packages](https://dart.dev/guides/libraries/create-packages)
-and the Flutter guide for
-[developing packages and plugins](https://flutter.dev/to/develop-packages).
--->
-
-TODO: Put a short description of the package here that helps potential users
-know whether this package might be useful for them.
+A local-first sync queue for Flutter apps. The package starts with a small,
+testable core for durable operations, retry backoff, conflict surfacing, and
+UI-friendly status streams.
 
 ## Features
 
-TODO: List what your package can do. Maybe include images, gifs, or videos.
+- Queue create, update, delete, or custom operations.
+- Persist queue records behind a storage interface.
+- Send operations through an app-owned transport adapter.
+- Retry failed operations with exponential backoff.
+- Surface conflicts instead of hiding them.
+- Watch per-entity sync status from Flutter UI.
 
 ## Getting started
 
-TODO: List prerequisites and provide or point to information on how to
-start using the package.
+This first version intentionally keeps storage and networking abstract. Use the
+in-memory store for tests and prototypes, then add a real adapter for your app's
+database.
 
 ## Usage
 
-TODO: Include short and useful examples for package users. Add longer examples
-to `/example` folder.
-
 ```dart
-const like = 'sample';
+final store = InMemorySyncStore();
+final engine = SyncEngine(
+  store: store,
+  transport: MyApiSyncTransport(),
+);
+
+await engine.enqueue(
+  SyncOperation(
+    id: 'operation-1',
+    entity: const SyncEntityRef(type: 'task', id: 'task-1'),
+    type: SyncOperationType.update,
+    payload: const {'title': 'Ship the package'},
+  ),
+);
+
+engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
+  (record) {
+    // pending, syncing, synced, failed, or conflicted
+    print(record.status);
+  },
+);
 ```
 
-## Additional information
+## Roadmap
 
-TODO: Tell users more about the package: where to find more information, how to
-contribute to the package, how to file issues, what response they can expect
-from the package authors, and more.
+- Storage adapters for Drift and Hive.
+- Conflict resolver helpers.
+- Connectivity-aware auto drain.
+- Optimistic update helpers.
+- Flutter widgets for sync badges and debug views.
