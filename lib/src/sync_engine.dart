@@ -205,6 +205,46 @@ class SyncEngine {
     }
   }
 
+  /// Returns a failed operation to the pending queue for a user-triggered retry.
+  ///
+  /// Returns `null` when the operation is no longer in the queue.
+  Future<SyncRecord?> retryFailedOperation(
+    String operationId, {
+    Map<String, Object?>? payload,
+    Map<String, Object?>? headers,
+    bool resetAttempts = true,
+    bool syncImmediately = true,
+  }) async {
+    final record = await store.read(operationId);
+    if (record == null) {
+      return null;
+    }
+
+    if (record.status != SyncStatus.failed) {
+      throw StateError('Operation "$operationId" is not failed.');
+    }
+
+    final pending = record.copyWith(
+      operation: record.operation.copyWith(
+        payload: payload ?? record.operation.payload,
+        headers: headers ?? record.operation.headers,
+      ),
+      status: SyncStatus.pending,
+      attempts: resetAttempts ? 0 : record.attempts,
+      clearNextAttemptAt: true,
+      clearLastFailure: true,
+      clearConflict: true,
+      updatedAt: _clock(),
+    );
+    await _saveAndEmit(pending);
+
+    if (syncImmediately) {
+      await drain();
+    }
+
+    return pending;
+  }
+
   /// Sends due operations until the queue is caught up for the current moment.
   Future<SyncDrainResult> drain({bool force = false}) async {
     if (_isDisposed) {

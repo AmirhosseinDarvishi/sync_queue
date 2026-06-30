@@ -18,6 +18,7 @@ UI-friendly status streams.
 - Adapt any JSON-capable persistence layer through `JsonSyncStore`.
 - Let JSON storage adapters provide optimized pending queries.
 - Surface conflicts instead of hiding them.
+- Retry failed operations after user action.
 - Watch per-entity sync status from Flutter UI.
 - Read aggregated entity sync state for badges and status rows.
 - Read queue-wide snapshots for global indicators and debug panels.
@@ -77,6 +78,11 @@ await engine.resolveConflict(
   const SyncConflictResolution.retry(
     payload: {'title': 'Merged title'},
   ),
+);
+
+await engine.retryFailedOperation(
+  'operation-1',
+  payload: {'title': 'Try again'},
 );
 
 final encoded = (await store.readAll()).map((record) => record.toJson());

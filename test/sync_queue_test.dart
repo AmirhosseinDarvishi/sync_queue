@@ -342,6 +342,71 @@ void main() {
     await engine.dispose();
   });
 
+  test('failed operations can be manually retried', () async {
+    var sendCount = 0;
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((operation) async {
+      sendCount += 1;
+      if (sendCount == 1) {
+        return const SyncResult.failure(
+          SyncFailure(message: 'Bad request', isRetryable: false),
+        );
+      }
+
+      return const SyncResult.success();
+    });
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final failed = (await store.readAll()).single;
+    expect(failed.status, SyncStatus.failed);
+    expect(failed.lastFailure?.message, 'Bad request');
+    expect(failed.attempts, 1);
+
+    final retried = await engine.retryFailedOperation(
+      'op-1',
+      payload: const <String, Object?>{'title': 'Retry payload'},
+      syncImmediately: false,
+    );
+
+    expect(retried?.status, SyncStatus.pending);
+    expect(retried?.attempts, 0);
+    expect(retried?.lastFailure, isNull);
+    expect(retried?.operation.payload, const <String, Object?>{
+      'title': 'Retry payload',
+    });
+
+    await engine.drain();
+
+    expect(transport.sent, hasLength(2));
+    expect(transport.sent.last.payload, const <String, Object?>{
+      'title': 'Retry payload',
+    });
+    expect(await store.readAll(), isEmpty);
+    await engine.dispose();
+  });
+
+  test('failed operation retry rejects non-failed records', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+
+    expect(
+      () => engine.retryFailedOperation('op-1', syncImmediately: false),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      await engine.retryFailedOperation('missing', syncImmediately: false),
+      isNull,
+    );
+
+    await engine.dispose();
+  });
+
   test('enqueue skips immediate drain while connectivity is offline', () async {
     final store = InMemorySyncStore();
     final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
