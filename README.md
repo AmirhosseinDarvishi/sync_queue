@@ -10,6 +10,8 @@ UI-friendly status streams.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
+- Pause automatic draining while offline.
+- Drain pending operations when connectivity returns.
 - Surface conflicts instead of hiding them.
 - Watch per-entity sync status from Flutter UI.
 
@@ -23,9 +25,11 @@ database.
 
 ```dart
 final store = InMemorySyncStore();
+final connectivity = ManualSyncConnectivity();
 final engine = SyncEngine(
   store: store,
   transport: MyApiSyncTransport(),
+  connectivity: connectivity,
 );
 
 await engine.enqueue(
@@ -49,6 +53,5 @@ engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
 
 - Storage adapters for Drift and Hive.
 - Conflict resolver helpers.
-- Connectivity-aware auto drain.
 - Optimistic update helpers.
 - Flutter widgets for sync badges and debug views.

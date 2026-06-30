@@ -3,3 +3,4 @@
 * Add the initial sync queue core.
 * Add operation, record, result, retry, store, and transport APIs.
 * Add an in-memory store for tests and examples.
+* Add connectivity-aware drain control.

@@ -6,6 +6,7 @@ import 'models/sync_operation.dart';
 import 'models/sync_record.dart';
 import 'models/sync_result.dart';
 import 'retry_policy.dart';
+import 'sync_connectivity.dart';
 import 'sync_store.dart';
 import 'sync_transport.dart';
 
@@ -16,16 +17,31 @@ class SyncEngine {
   SyncEngine({
     required this.store,
     required this.transport,
+    SyncConnectivity? connectivity,
     this.retryPolicy = const RetryPolicy(),
+    this.autoDrainOnConnectivityRestored = true,
     Clock? clock,
-  }) : _clock = clock ?? DateTime.now;
+  }) : connectivity = connectivity ?? const AlwaysOnlineSyncConnectivity(),
+       _clock = clock ?? DateTime.now {
+    if (autoDrainOnConnectivityRestored) {
+      _connectivitySubscription = this.connectivity.changes.listen((status) {
+        if (status.isOnline) {
+          unawaited(drain());
+        }
+      });
+    }
+  }
 
   final SyncStore store;
   final SyncTransport transport;
+  final SyncConnectivity connectivity;
   final RetryPolicy retryPolicy;
+  final bool autoDrainOnConnectivityRestored;
   final Clock _clock;
   final _events = StreamController<SyncRecord>.broadcast();
+  StreamSubscription<SyncConnectivityStatus>? _connectivitySubscription;
   var _isDraining = false;
+  var _isDisposed = false;
 
   /// Emits every record transition processed by this engine.
   Stream<SyncRecord> get events => _events.stream;
@@ -51,8 +67,12 @@ class SyncEngine {
   }
 
   /// Sends due operations until the queue is caught up for the current moment.
-  Future<void> drain() async {
-    if (_isDraining) {
+  Future<void> drain({bool force = false}) async {
+    if (_isDisposed || _isDraining) {
+      return;
+    }
+
+    if (!force && !await _canDrain()) {
       return;
     }
 
@@ -70,7 +90,13 @@ class SyncEngine {
   }
 
   Future<void> dispose() async {
+    _isDisposed = true;
+    await _connectivitySubscription?.cancel();
     await _events.close();
+  }
+
+  Future<bool> _canDrain() async {
+    return (await connectivity.status).isOnline;
   }
 
   Future<void> _process(SyncRecord record) async {
@@ -148,6 +174,8 @@ class SyncEngine {
 
   Future<void> _saveAndEmit(SyncRecord record) async {
     await store.put(record);
-    _events.add(record);
+    if (!_isDisposed) {
+      _events.add(record);
+    }
   }
 }

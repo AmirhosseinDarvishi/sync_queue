@@ -114,4 +114,97 @@ void main() {
     expect(record.conflict?.message, 'Server version changed');
     await engine.dispose();
   });
+
+  test('enqueue skips immediate drain while connectivity is offline', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+    );
+
+    await engine.enqueue(operation());
+
+    final records = await store.readAll();
+    expect(records, hasLength(1));
+    expect(records.single.status, SyncStatus.pending);
+    expect(transport.sent, isEmpty);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
+
+  test('engine drains pending operations when connectivity returns', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    final synced = engine.events.firstWhere(
+      (record) => record.status == SyncStatus.synced,
+    );
+
+    connectivity.setOnline();
+    await synced;
+
+    expect(transport.sent, hasLength(1));
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
+
+  test('forced drain ignores offline connectivity status', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain(force: true);
+
+    expect(transport.sent, hasLength(1));
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
+
+  test('auto drain can be disabled for custom schedulers', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+      autoDrainOnConnectivityRestored: false,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    connectivity.setOnline();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(transport.sent, isEmpty);
+    expect(await store.readAll(), hasLength(1));
+
+    await engine.drain();
+
+    expect(transport.sent, hasLength(1));
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
 }
