@@ -1,3 +1,4 @@
+import '../sync_json.dart';
 import 'sync_failure.dart';
 
 /// Result returned after a transport attempts to send one operation.
@@ -33,7 +34,23 @@ class SyncFailureResult extends SyncResult {
 class SyncConflict extends SyncResult {
   const SyncConflict({required this.message, this.local, this.remote});
 
+  factory SyncConflict.fromJson(SyncJsonMap json) {
+    return SyncConflict(
+      message: readString(json, 'message'),
+      local: json['local'],
+      remote: json['remote'],
+    );
+  }
+
   final String message;
   final Object? local;
   final Object? remote;
+
+  SyncJsonMap toJson() {
+    return <String, Object?>{
+      'message': message,
+      'local': local,
+      'remote': remote,
+    };
+  }
 }

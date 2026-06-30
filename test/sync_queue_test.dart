@@ -15,12 +15,13 @@ class FakeTransport implements SyncTransport {
 }
 
 void main() {
-  SyncOperation operation({String id = 'op-1'}) {
+  SyncOperation operation({String id = 'op-1', DateTime? createdAt}) {
     return SyncOperation(
       id: id,
       entity: const SyncEntityRef(type: 'task', id: 'task-1'),
       type: SyncOperationType.update,
       payload: const <String, Object?>{'title': 'Ship package'},
+      createdAt: createdAt,
     );
   }
 
@@ -206,5 +207,104 @@ void main() {
 
     await engine.dispose();
     await connectivity.dispose();
+  });
+
+  test('operation JSON round trip preserves durable fields', () {
+    final createdAt = DateTime.utc(2026, 6, 30, 12, 15);
+    final source = SyncOperation(
+      id: 'op-serialize',
+      entity: const SyncEntityRef(type: 'invoice', id: 'invoice-1'),
+      type: SyncOperationType.create,
+      payload: const <String, Object?>{
+        'amount': 4200,
+        'tags': <Object?>['paid', 'vip'],
+      },
+      headers: const <String, Object?>{'endpoint': 'createInvoice'},
+      createdAt: createdAt,
+    );
+
+    final restored = SyncOperation.fromJson(source.toJson());
+
+    expect(restored.id, source.id);
+    expect(restored.entity, source.entity);
+    expect(restored.type, source.type);
+    expect(restored.payload, source.payload);
+    expect(restored.headers, source.headers);
+    expect(restored.createdAt, createdAt);
+  });
+
+  test('failed record JSON round trip preserves retry state', () {
+    final operationCreatedAt = DateTime.utc(2026, 6, 30, 12);
+    final updatedAt = DateTime.utc(2026, 6, 30, 12, 1);
+    final nextAttemptAt = DateTime.utc(2026, 6, 30, 12, 5);
+    final source = SyncRecord(
+      operation: operation(createdAt: operationCreatedAt),
+      status: SyncStatus.pending,
+      attempts: 2,
+      nextAttemptAt: nextAttemptAt,
+      lastFailure: const SyncFailure(
+        message: 'Temporary outage',
+        code: 'network',
+      ),
+      updatedAt: updatedAt,
+    );
+
+    final restored = SyncRecord.fromJson(source.toJson());
+
+    expect(restored.operation.id, source.operation.id);
+    expect(restored.status, source.status);
+    expect(restored.attempts, source.attempts);
+    expect(restored.nextAttemptAt, nextAttemptAt);
+    expect(restored.lastFailure?.message, 'Temporary outage');
+    expect(restored.lastFailure?.code, 'network');
+    expect(restored.updatedAt, updatedAt);
+  });
+
+  test('conflicted record JSON round trip preserves conflict details', () {
+    final source = SyncRecord(
+      operation: operation(createdAt: DateTime.utc(2026, 6, 30, 12)),
+      status: SyncStatus.conflicted,
+      conflict: const SyncConflict(
+        message: 'Server changed',
+        local: <String, Object?>{'title': 'Local'},
+        remote: <String, Object?>{'title': 'Remote'},
+      ),
+      updatedAt: DateTime.utc(2026, 6, 30, 12, 2),
+    );
+
+    final restored = SyncRecord.fromJson(source.toJson());
+
+    expect(restored.status, SyncStatus.conflicted);
+    expect(restored.conflict?.message, 'Server changed');
+    expect(restored.conflict?.local, const <String, Object?>{'title': 'Local'});
+    expect(restored.conflict?.remote, const <String, Object?>{
+      'title': 'Remote',
+    });
+  });
+
+  test('unknown wire values throw format exceptions', () {
+    expect(
+      () => SyncOperation.fromJson(<String, Object?>{
+        'id': 'op-invalid',
+        'entity': const SyncEntityRef(type: 'task', id: 'task-1').toJson(),
+        'type': 'merge',
+        'payload': const <String, Object?>{},
+        'headers': const <String, Object?>{},
+        'createdAt': DateTime.utc(2026).toIso8601String(),
+      }),
+      throwsA(isA<FormatException>()),
+    );
+    expect(
+      () => SyncRecord.fromJson(<String, Object?>{
+        'operation': operation(createdAt: DateTime.utc(2026)).toJson(),
+        'status': 'paused',
+        'attempts': 0,
+        'nextAttemptAt': null,
+        'lastFailure': null,
+        'conflict': null,
+        'updatedAt': DateTime.utc(2026).toIso8601String(),
+      }),
+      throwsA(isA<FormatException>()),
+    );
   });
 }

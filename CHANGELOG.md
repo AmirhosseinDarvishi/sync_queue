@@ -4,3 +4,4 @@
 * Add operation, record, result, retry, store, and transport APIs.
 * Add an in-memory store for tests and examples.
 * Add connectivity-aware drain control.
+* Add JSON serialization for queue records and operations.

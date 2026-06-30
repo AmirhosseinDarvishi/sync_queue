@@ -1,6 +1,15 @@
+import '../sync_json.dart';
+
 /// Identifies one domain object across local storage, the queue, and the UI.
 class SyncEntityRef {
   const SyncEntityRef({required this.type, required this.id});
+
+  factory SyncEntityRef.fromJson(SyncJsonMap json) {
+    return SyncEntityRef(
+      type: readString(json, 'type'),
+      id: readString(json, 'id'),
+    );
+  }
 
   /// Domain type, such as `task`, `invoice`, or `profile`.
   final String type;
@@ -16,6 +25,10 @@ class SyncEntityRef {
 
   @override
   int get hashCode => Object.hash(type, id);
+
+  SyncJsonMap toJson() {
+    return <String, Object?>{'type': type, 'id': id};
+  }
 
   @override
   String toString() => '$type/$id';

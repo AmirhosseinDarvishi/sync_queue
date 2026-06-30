@@ -1,3 +1,5 @@
+import '../sync_json.dart';
+
 /// A failure returned by the transport layer or captured from an exception.
 class SyncFailure {
   const SyncFailure({
@@ -18,6 +20,22 @@ class SyncFailure {
 
   /// Original exception or response object, when available.
   final Object? cause;
+
+  factory SyncFailure.fromJson(SyncJsonMap json) {
+    return SyncFailure(
+      message: readString(json, 'message'),
+      code: readOptionalString(json, 'code'),
+      isRetryable: readBool(json, 'isRetryable'),
+    );
+  }
+
+  SyncJsonMap toJson() {
+    return <String, Object?>{
+      'message': message,
+      'code': code,
+      'isRetryable': isRetryable,
+    };
+  }
 
   @override
   String toString() {

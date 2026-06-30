@@ -12,6 +12,7 @@ UI-friendly status streams.
 - Retry failed operations with exponential backoff.
 - Pause automatic draining while offline.
 - Drain pending operations when connectivity returns.
+- Serialize operations and records for durable stores.
 - Surface conflicts instead of hiding them.
 - Watch per-entity sync status from Flutter UI.
 
@@ -47,6 +48,8 @@ engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
     print(record.status);
   },
 );
+
+final encoded = (await store.readAll()).map((record) => record.toJson());
 ```
 
 ## Roadmap
