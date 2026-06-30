@@ -74,12 +74,19 @@ class TrackingSyncJsonStorage extends InMemorySyncJsonStorage {
 }
 
 void main() {
-  SyncOperation operation({String id = 'op-1', DateTime? createdAt}) {
+  SyncOperation operation({
+    String id = 'op-1',
+    SyncEntityRef entity = const SyncEntityRef(type: 'task', id: 'task-1'),
+    Map<String, Object?> payload = const <String, Object?>{
+      'title': 'Ship package',
+    },
+    DateTime? createdAt,
+  }) {
     return SyncOperation(
       id: id,
-      entity: const SyncEntityRef(type: 'task', id: 'task-1'),
+      entity: entity,
       type: SyncOperationType.update,
-      payload: const <String, Object?>{'title': 'Ship package'},
+      payload: payload,
       createdAt: createdAt,
     );
   }
@@ -123,6 +130,66 @@ void main() {
     expect(record.operation.payload, const <String, Object?>{
       'title': 'Generated',
     });
+    await engine.dispose();
+  });
+
+  test('enqueue latest mutation replaces older pending work', () async {
+    var generatedId = 0;
+    final now = DateTime.utc(2026, 6, 30, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      operationIdGenerator: () => 'generated-${generatedId++}',
+      clock: () => now,
+    );
+
+    await engine.enqueue(
+      operation(
+        id: 'older-task',
+        entity: task,
+        payload: const <String, Object?>{'title': 'Older'},
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'invoice-work', entity: invoice),
+      syncImmediately: false,
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'failed-task', entity: task),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Needs attention'),
+      ),
+    );
+
+    final latest = await engine.enqueueLatestMutation(
+      entity: task,
+      type: SyncOperationType.update,
+      payload: const <String, Object?>{'title': 'Latest'},
+      syncImmediately: false,
+    );
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(latest.operation.id, 'generated-0');
+    expect(latest.operation.createdAt, now);
+    expect(latest.operation.payload, const <String, Object?>{
+      'title': 'Latest',
+    });
+    expect(
+      records.keys,
+      unorderedEquals(<String>['invoice-work', 'failed-task', 'generated-0']),
+    );
+    expect(records['failed-task']?.status, SyncStatus.failed);
+    expect(transport.sent, isEmpty);
+
     await engine.dispose();
   });
 

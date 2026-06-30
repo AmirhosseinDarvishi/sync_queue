@@ -7,6 +7,7 @@ UI-friendly status streams.
 ## Features
 
 - Queue create, update, delete, or custom operations.
+- Keep only the latest pending mutation for noisy edit flows.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
@@ -54,6 +55,12 @@ await engine.enqueueMutation(
   entity: const SyncEntityRef(type: 'task', id: 'task-2'),
   type: SyncOperationType.update,
   payload: const {'title': 'Generated operation id'},
+);
+
+await engine.enqueueLatestMutation(
+  entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+  type: SyncOperationType.update,
+  payload: const {'title': 'Only the latest pending update stays queued'},
 );
 
 final drain = await engine.drain();

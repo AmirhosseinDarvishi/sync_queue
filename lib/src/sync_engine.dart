@@ -139,6 +139,29 @@ class SyncEngine {
     return enqueue(operation, syncImmediately: syncImmediately);
   }
 
+  /// Enqueues a mutation after removing older pending work for the same entity.
+  ///
+  /// Failed, conflicted, and syncing records are preserved because they need a
+  /// separate user or app-level decision.
+  Future<SyncRecord> enqueueLatestMutation({
+    required SyncEntityRef entity,
+    required SyncOperationType type,
+    required Map<String, Object?> payload,
+    Map<String, Object?> headers = const <String, Object?>{},
+    bool syncImmediately = true,
+  }) async {
+    final operation = SyncOperation(
+      id: operationIdGenerator(),
+      entity: entity,
+      type: type,
+      payload: payload,
+      headers: headers,
+      createdAt: _clock(),
+    );
+    await _deletePendingForEntity(entity);
+    return enqueue(operation, syncImmediately: syncImmediately);
+  }
+
   /// Resolves a conflicted operation using an app-provided decision.
   ///
   /// Returns `null` when the operation is no longer in the queue.
@@ -420,6 +443,19 @@ class SyncEngine {
   Future<void> _saveAndEmit(SyncRecord record) async {
     await store.put(record);
     _emit(record);
+  }
+
+  Future<void> _deletePendingForEntity(SyncEntityRef entity) async {
+    final records = await store.readAll();
+
+    for (final record in records) {
+      if (record.status == SyncStatus.pending &&
+          record.operation.entity == entity) {
+        await store.delete(record.operation.id);
+      }
+    }
+
+    await _scheduleNextPendingDrain();
   }
 
   void _emit(SyncRecord record) {
