@@ -600,6 +600,104 @@ void main() {
     await engine.dispose();
   });
 
+  test(
+    'read queue snapshot counts records and chooses global status',
+    () async {
+      final store = InMemorySyncStore();
+      final engine = SyncEngine(
+        store: store,
+        transport: FakeTransport((_) async => const SyncResult.success()),
+      );
+      final firstRetry = DateTime.utc(2026, 6, 30, 12);
+      final secondRetry = firstRetry.add(const Duration(minutes: 1));
+
+      await store.put(
+        SyncRecord(
+          operation: operation(id: 'pending-1', createdAt: DateTime.utc(2026)),
+          nextAttemptAt: secondRetry,
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'pending-2',
+            createdAt: DateTime.utc(2026, 1, 2),
+          ),
+          nextAttemptAt: firstRetry,
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'syncing',
+            createdAt: DateTime.utc(2026, 1, 3),
+          ),
+          status: SyncStatus.syncing,
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'failed',
+            createdAt: DateTime.utc(2026, 1, 4),
+          ),
+          status: SyncStatus.failed,
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'conflicted',
+            createdAt: DateTime.utc(2026, 1, 5),
+          ),
+          status: SyncStatus.conflicted,
+        ),
+      );
+
+      final snapshot = await engine.readQueueSnapshot();
+
+      expect(snapshot.status, SyncQueueStatus.conflicted);
+      expect(snapshot.totalCount, 5);
+      expect(snapshot.pendingCount, 2);
+      expect(snapshot.syncingCount, 1);
+      expect(snapshot.failedCount, 1);
+      expect(snapshot.conflictedCount, 1);
+      expect(snapshot.syncedCount, 0);
+      expect(snapshot.nextAttemptAt, firstRetry);
+      expect(snapshot.hasPendingWork, isTrue);
+      expect(snapshot.isSyncing, isTrue);
+      expect(snapshot.needsAttention, isTrue);
+
+      await engine.dispose();
+    },
+  );
+
+  test('watch queue snapshot emits initial and changed snapshots', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final snapshots = engine
+        .watchQueueSnapshot()
+        .map((snapshot) => snapshot.status)
+        .take(4);
+    final expectation = expectLater(
+      snapshots,
+      emitsInOrder(<SyncQueueStatus>[
+        SyncQueueStatus.idle,
+        SyncQueueStatus.pending,
+        SyncQueueStatus.syncing,
+        SyncQueueStatus.idle,
+      ]),
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+    await expectation;
+
+    await engine.dispose();
+  });
+
   test('conflict retry updates operation and returns it to pending', () async {
     var sendCount = 0;
     final store = InMemorySyncStore();

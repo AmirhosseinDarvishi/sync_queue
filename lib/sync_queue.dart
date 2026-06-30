@@ -5,6 +5,7 @@ export 'src/models/sync_entity_ref.dart';
 export 'src/models/sync_entity_state.dart';
 export 'src/models/sync_failure.dart';
 export 'src/models/sync_operation.dart';
+export 'src/models/sync_queue_snapshot.dart';
 export 'src/models/sync_record.dart';
 export 'src/models/sync_result.dart';
 export 'src/retry_policy.dart';

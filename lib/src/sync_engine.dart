@@ -5,6 +5,7 @@ import 'models/sync_entity_ref.dart';
 import 'models/sync_entity_state.dart';
 import 'models/sync_failure.dart';
 import 'models/sync_operation.dart';
+import 'models/sync_queue_snapshot.dart';
 import 'models/sync_record.dart';
 import 'models/sync_result.dart';
 import 'retry_policy.dart';
@@ -86,6 +87,20 @@ class SyncEngine {
 
     await for (final _ in watchEntity(entity)) {
       yield await readEntityState(entity);
+    }
+  }
+
+  /// Reads an aggregated snapshot for the whole queue.
+  Future<SyncQueueSnapshot> readQueueSnapshot() async {
+    return SyncQueueSnapshot.fromRecords(await store.readAll());
+  }
+
+  /// Emits an initial queue snapshot, then emits a fresh snapshot on each change.
+  Stream<SyncQueueSnapshot> watchQueueSnapshot() async* {
+    yield await readQueueSnapshot();
+
+    await for (final _ in events) {
+      yield await readQueueSnapshot();
     }
   }
 
