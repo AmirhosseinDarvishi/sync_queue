@@ -17,6 +17,12 @@ abstract interface class SyncJsonStorage {
   Future<List<SyncJsonMap>> readAll();
 }
 
+/// Optional optimized query boundary for JSON-like persistence adapters.
+abstract interface class SyncJsonQueryStorage implements SyncJsonStorage {
+  /// Reads pending records that should run at or before [dueAt].
+  Future<List<SyncJsonMap>> readPending({required DateTime dueAt});
+}
+
 /// Sync store backed by a JSON-like storage adapter.
 ///
 /// Use this when your app already has a persistence layer that can store maps,
@@ -41,6 +47,12 @@ class JsonSyncStore implements SyncStore {
   @override
   Future<List<SyncRecord>> readPending({DateTime? dueAt}) async {
     final now = dueAt ?? DateTime.now();
+    final storage = this.storage;
+
+    if (storage is SyncJsonQueryStorage) {
+      return _decodeAndSort(await storage.readPending(dueAt: now));
+    }
+
     final records = await readAll();
     return records
         .where((record) {
@@ -61,7 +73,11 @@ class JsonSyncStore implements SyncStore {
 
   @override
   Future<List<SyncRecord>> readAll() async {
-    final records = (await storage.readAll())
+    return _decodeAndSort(await storage.readAll());
+  }
+
+  List<SyncRecord> _decodeAndSort(List<SyncJsonMap> jsonRecords) {
+    final records = jsonRecords
         .map(SyncRecord.fromJson)
         .toList(growable: false);
     records.sort(_compareByCreatedAt);
@@ -74,7 +90,7 @@ class JsonSyncStore implements SyncStore {
 }
 
 /// In-memory JSON storage for tests, demos, and custom prototypes.
-class InMemorySyncJsonStorage implements SyncJsonStorage {
+class InMemorySyncJsonStorage implements SyncJsonQueryStorage {
   final _records = <String, SyncJsonMap>{};
 
   @override
@@ -98,5 +114,22 @@ class InMemorySyncJsonStorage implements SyncJsonStorage {
     return _records.values
         .map((record) => Map<String, Object?>.from(record))
         .toList(growable: false);
+  }
+
+  @override
+  Future<List<SyncJsonMap>> readPending({required DateTime dueAt}) async {
+    return _records.values
+        .where((record) => _isDuePendingRecord(record, dueAt))
+        .map((record) => Map<String, Object?>.from(record))
+        .toList(growable: false);
+  }
+
+  bool _isDuePendingRecord(SyncJsonMap record, DateTime dueAt) {
+    if (readString(record, 'status') != SyncStatus.pending.wireName) {
+      return false;
+    }
+
+    final nextAttemptAt = readOptionalDateTime(record, 'nextAttemptAt');
+    return nextAttemptAt == null || !nextAttemptAt.isAfter(dueAt);
   }
 }

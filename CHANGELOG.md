@@ -6,6 +6,7 @@
 * Add conflict resolution helpers for retry, discard, and fail decisions.
 * Add automatic retry scheduling for delayed operations.
 * Add queue-wide snapshot helpers for global sync indicators.
+* Add optimized pending-query support for JSON storage adapters.
 
 ## 0.1.0-dev.1
 

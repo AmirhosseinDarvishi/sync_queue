@@ -56,6 +56,23 @@ class FakeTimerFactory {
   }
 }
 
+class TrackingSyncJsonStorage extends InMemorySyncJsonStorage {
+  var readAllCalls = 0;
+  var readPendingCalls = 0;
+
+  @override
+  Future<List<SyncJsonMap>> readAll() async {
+    readAllCalls += 1;
+    throw StateError('readAll should not be used for pending queries.');
+  }
+
+  @override
+  Future<List<SyncJsonMap>> readPending({required DateTime dueAt}) async {
+    readPendingCalls += 1;
+    return super.readPending(dueAt: dueAt);
+  }
+}
+
 void main() {
   SyncOperation operation({String id = 'op-1', DateTime? createdAt}) {
     return SyncOperation(
@@ -505,6 +522,37 @@ void main() {
     final pending = await store.readPending(dueAt: dueAt);
 
     expect(pending.map((record) => record.operation.id), <String>['due']);
+  });
+
+  test('JSON sync store can use optimized pending queries', () async {
+    final storage = TrackingSyncJsonStorage();
+    final store = JsonSyncStore(storage);
+    final dueAt = DateTime.utc(2026, 6, 30, 12);
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'due', createdAt: DateTime.utc(2026)),
+        nextAttemptAt: dueAt,
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'future', createdAt: DateTime.utc(2026, 1, 2)),
+        nextAttemptAt: dueAt.add(const Duration(minutes: 1)),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'failed', createdAt: DateTime.utc(2026, 1, 3)),
+        status: SyncStatus.failed,
+      ),
+    );
+
+    final pending = await store.readPending(dueAt: dueAt);
+
+    expect(pending.map((record) => record.operation.id), <String>['due']);
+    expect(storage.readPendingCalls, 1);
+    expect(storage.readAllCalls, 0);
   });
 
   test('sync engine can drain with a JSON sync store', () async {

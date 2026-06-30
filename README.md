@@ -15,6 +15,7 @@ UI-friendly status streams.
 - Drain pending operations when connectivity returns.
 - Serialize operations and records for durable stores.
 - Adapt any JSON-capable persistence layer through `JsonSyncStore`.
+- Let JSON storage adapters provide optimized pending queries.
 - Surface conflicts instead of hiding them.
 - Watch per-entity sync status from Flutter UI.
 - Read aggregated entity sync state for badges and status rows.
