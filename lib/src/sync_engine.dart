@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'models/sync_conflict_resolution.dart';
+import 'models/sync_drain_result.dart';
 import 'models/sync_entity_ref.dart';
 import 'models/sync_entity_state.dart';
 import 'models/sync_failure.dart';
@@ -205,23 +206,50 @@ class SyncEngine {
   }
 
   /// Sends due operations until the queue is caught up for the current moment.
-  Future<void> drain({bool force = false}) async {
-    if (_isDisposed || _isDraining) {
-      return;
+  Future<SyncDrainResult> drain({bool force = false}) async {
+    if (_isDisposed) {
+      return const SyncDrainResult.skipped(SyncDrainStatus.skippedDisposed);
+    }
+
+    if (_isDraining) {
+      return const SyncDrainResult.skipped(
+        SyncDrainStatus.skippedAlreadyDraining,
+      );
     }
 
     if (!force && !await _canDrain()) {
-      return;
+      return const SyncDrainResult.skipped(SyncDrainStatus.skippedOffline);
     }
 
     _isDraining = true;
     try {
       final dueAt = _clock();
       final records = await store.readPending(dueAt: dueAt);
+      var succeededCount = 0;
+      var retryScheduledCount = 0;
+      var failedCount = 0;
+      var conflictedCount = 0;
 
       for (final record in records) {
-        await _process(record);
+        switch (await _process(record)) {
+          case _SyncProcessOutcome.succeeded:
+            succeededCount += 1;
+          case _SyncProcessOutcome.retryScheduled:
+            retryScheduledCount += 1;
+          case _SyncProcessOutcome.failed:
+            failedCount += 1;
+          case _SyncProcessOutcome.conflicted:
+            conflictedCount += 1;
+        }
       }
+
+      return SyncDrainResult.completed(
+        processedCount: records.length,
+        succeededCount: succeededCount,
+        retryScheduledCount: retryScheduledCount,
+        failedCount: failedCount,
+        conflictedCount: conflictedCount,
+      );
     } finally {
       _isDraining = false;
       await _scheduleNextPendingDrain();
@@ -239,7 +267,7 @@ class SyncEngine {
     return (await connectivity.status).isOnline;
   }
 
-  Future<void> _process(SyncRecord record) async {
+  Future<_SyncProcessOutcome> _process(SyncRecord record) async {
     final attempt = record.copyWith(
       status: SyncStatus.syncing,
       attempts: record.attempts + 1,
@@ -252,16 +280,19 @@ class SyncEngine {
 
     try {
       final result = await transport.send(attempt.operation);
-      await _applyResult(attempt, result);
+      return await _applyResult(attempt, result);
     } on Object catch (error) {
-      await _handleFailure(
+      return await _handleFailure(
         attempt,
         SyncFailure(message: error.toString(), cause: error),
       );
     }
   }
 
-  Future<void> _applyResult(SyncRecord attempt, SyncResult result) async {
+  Future<_SyncProcessOutcome> _applyResult(
+    SyncRecord attempt,
+    SyncResult result,
+  ) async {
     switch (result) {
       case SyncSuccess():
         final synced = attempt.copyWith(
@@ -273,8 +304,9 @@ class SyncEngine {
         );
         await store.delete(attempt.operation.id);
         _emit(synced);
+        return _SyncProcessOutcome.succeeded;
       case SyncFailureResult(:final failure):
-        await _handleFailure(attempt, failure);
+        return await _handleFailure(attempt, failure);
       case SyncConflict():
         final conflicted = attempt.copyWith(
           status: SyncStatus.conflicted,
@@ -284,10 +316,14 @@ class SyncEngine {
           updatedAt: _clock(),
         );
         await _saveAndEmit(conflicted);
+        return _SyncProcessOutcome.conflicted;
     }
   }
 
-  Future<void> _handleFailure(SyncRecord attempt, SyncFailure failure) async {
+  Future<_SyncProcessOutcome> _handleFailure(
+    SyncRecord attempt,
+    SyncFailure failure,
+  ) async {
     if (!retryPolicy.canRetry(
       attempts: attempt.attempts,
       isRetryable: failure.isRetryable,
@@ -299,7 +335,7 @@ class SyncEngine {
         updatedAt: _clock(),
       );
       await _saveAndEmit(failed);
-      return;
+      return _SyncProcessOutcome.failed;
     }
 
     final retryAt = _clock().add(retryPolicy.delayForAttempt(attempt.attempts));
@@ -311,6 +347,7 @@ class SyncEngine {
     );
     await _saveAndEmit(pending);
     _scheduleRetryAt(retryAt);
+    return _SyncProcessOutcome.retryScheduled;
   }
 
   Future<void> _saveAndEmit(SyncRecord record) async {
@@ -389,3 +426,5 @@ class SyncEngine {
     _scheduledRetryAt = null;
   }
 }
+
+enum _SyncProcessOutcome { succeeded, retryScheduled, failed, conflicted }

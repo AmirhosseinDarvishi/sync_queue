@@ -1,6 +1,7 @@
 library;
 
 export 'src/models/sync_conflict_resolution.dart';
+export 'src/models/sync_drain_result.dart';
 export 'src/models/sync_entity_ref.dart';
 export 'src/models/sync_entity_state.dart';
 export 'src/models/sync_failure.dart';

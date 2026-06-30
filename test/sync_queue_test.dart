@@ -136,8 +136,16 @@ void main() {
         .listen((record) => statuses.add(record.status));
 
     await engine.enqueue(operation(), syncImmediately: false);
-    await engine.drain();
+    final result = await engine.drain();
 
+    expect(result.status, SyncDrainStatus.completed);
+    expect(result.processedCount, 1);
+    expect(result.succeededCount, 1);
+    expect(result.retryScheduledCount, 0);
+    expect(result.failedCount, 0);
+    expect(result.conflictedCount, 0);
+    expect(result.didWork, isTrue);
+    expect(result.needsAttention, isFalse);
     expect(transport.sent, hasLength(1));
     expect(await store.readAll(), isEmpty);
     expect(
@@ -149,6 +157,65 @@ void main() {
       ]),
     );
     await subscription.cancel();
+    await engine.dispose();
+  });
+
+  test('drain returns outcome counts for processed records', () async {
+    final now = DateTime.utc(2026, 6, 30, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((operation) async {
+      return switch (operation.id) {
+        'success' => const SyncResult.success(),
+        'retry' => const SyncResult.failure(
+          SyncFailure(message: 'Network unavailable'),
+        ),
+        'fail' => const SyncResult.failure(
+          SyncFailure(message: 'Bad request', isRetryable: false),
+        ),
+        'conflict' => const SyncResult.conflict(message: 'Server changed'),
+        _ => throw StateError('Unexpected operation ${operation.id}'),
+      };
+    });
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(id: 'success'), syncImmediately: false);
+    await engine.enqueue(operation(id: 'retry'), syncImmediately: false);
+    await engine.enqueue(operation(id: 'fail'), syncImmediately: false);
+    await engine.enqueue(operation(id: 'conflict'), syncImmediately: false);
+
+    final result = await engine.drain();
+
+    expect(result.status, SyncDrainStatus.completed);
+    expect(result.isCompleted, isTrue);
+    expect(result.wasSkipped, isFalse);
+    expect(result.didWork, isTrue);
+    expect(result.needsAttention, isTrue);
+    expect(result.processedCount, 4);
+    expect(result.succeededCount, 1);
+    expect(result.retryScheduledCount, 1);
+    expect(result.failedCount, 1);
+    expect(result.conflictedCount, 1);
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+    expect(
+      records.keys,
+      unorderedEquals(<String>['retry', 'fail', 'conflict']),
+    );
+    expect(records['retry']?.status, SyncStatus.pending);
+    expect(
+      records['retry']?.nextAttemptAt,
+      now.add(const Duration(seconds: 5)),
+    );
+    expect(records['fail']?.status, SyncStatus.failed);
+    expect(records['conflict']?.status, SyncStatus.conflicted);
+
     await engine.dispose();
   });
 
@@ -290,6 +357,13 @@ void main() {
     final records = await store.readAll();
     expect(records, hasLength(1));
     expect(records.single.status, SyncStatus.pending);
+    expect(transport.sent, isEmpty);
+
+    final result = await engine.drain();
+    expect(result.status, SyncDrainStatus.skippedOffline);
+    expect(result.wasSkipped, isTrue);
+    expect(result.didWork, isFalse);
+    expect(result.processedCount, 0);
     expect(transport.sent, isEmpty);
 
     await engine.dispose();

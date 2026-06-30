@@ -11,6 +11,7 @@ UI-friendly status streams.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
 - Automatically retry due operations on schedule.
+- Inspect drain summaries after each sync pass.
 - Pause automatic draining while offline.
 - Drain pending operations when connectivity returns.
 - Serialize operations and records for durable stores.
@@ -52,6 +53,9 @@ await engine.enqueueMutation(
   type: SyncOperationType.update,
   payload: const {'title': 'Generated operation id'},
 );
+
+final drain = await engine.drain();
+print(drain.succeededCount);
 
 engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
   (record) {

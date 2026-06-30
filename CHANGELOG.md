@@ -7,6 +7,7 @@
 * Add automatic retry scheduling for delayed operations.
 * Add queue-wide snapshot helpers for global sync indicators.
 * Add optimized pending-query support for JSON storage adapters.
+* Add drain result summaries with processed outcome counts.
 
 ## 0.1.0-dev.1
 
