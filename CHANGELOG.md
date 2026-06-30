@@ -9,6 +9,7 @@
 * Add optimized pending-query support for JSON storage adapters.
 * Add drain result summaries with processed outcome counts.
 * Add manual retry support for failed operations.
+* Add manual discard support for queued operations.
 
 ## 0.1.0-dev.1
 

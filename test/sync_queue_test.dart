@@ -407,6 +407,45 @@ void main() {
     await engine.dispose();
   });
 
+  test('discard operation removes queued work and emits synced', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final emitted = <SyncStatus>[];
+    final subscription = engine.events.listen(
+      (record) => emitted.add(record.status),
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+
+    final discarded = await engine.discardOperation('op-1');
+
+    expect(discarded?.status, SyncStatus.synced);
+    expect(discarded?.lastFailure, isNull);
+    expect(discarded?.conflict, isNull);
+    expect(await store.readAll(), isEmpty);
+    expect(transport.sent, isEmpty);
+    expect(emitted, <SyncStatus>[SyncStatus.pending, SyncStatus.synced]);
+
+    await subscription.cancel();
+    await engine.dispose();
+  });
+
+  test('discard operation rejects syncing records', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await store.put(
+      SyncRecord(operation: operation(), status: SyncStatus.syncing),
+    );
+
+    expect(() => engine.discardOperation('op-1'), throwsA(isA<StateError>()));
+    expect(await engine.discardOperation('missing'), isNull);
+
+    await engine.dispose();
+  });
+
   test('enqueue skips immediate drain while connectivity is offline', () async {
     final store = InMemorySyncStore();
     final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);

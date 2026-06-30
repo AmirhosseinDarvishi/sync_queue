@@ -245,6 +245,33 @@ class SyncEngine {
     return pending;
   }
 
+  /// Removes a queued operation without sending it.
+  ///
+  /// Returns a transient synced record for UI streams, or `null` when the
+  /// operation is no longer in the queue.
+  Future<SyncRecord?> discardOperation(String operationId) async {
+    final record = await store.read(operationId);
+    if (record == null) {
+      return null;
+    }
+
+    if (record.status == SyncStatus.syncing) {
+      throw StateError('Operation "$operationId" is currently syncing.');
+    }
+
+    final discarded = record.copyWith(
+      status: SyncStatus.synced,
+      clearNextAttemptAt: true,
+      clearLastFailure: true,
+      clearConflict: true,
+      updatedAt: _clock(),
+    );
+    await store.delete(operationId);
+    _emit(discarded);
+    await _scheduleNextPendingDrain();
+    return discarded;
+  }
+
   /// Sends due operations until the queue is caught up for the current moment.
   Future<SyncDrainResult> drain({bool force = false}) async {
     if (_isDisposed) {

@@ -19,6 +19,7 @@ UI-friendly status streams.
 - Let JSON storage adapters provide optimized pending queries.
 - Surface conflicts instead of hiding them.
 - Retry failed operations after user action.
+- Discard queued operations before they are sent.
 - Watch per-entity sync status from Flutter UI.
 - Read aggregated entity sync state for badges and status rows.
 - Read queue-wide snapshots for global indicators and debug panels.
@@ -84,6 +85,8 @@ await engine.retryFailedOperation(
   'operation-1',
   payload: {'title': 'Try again'},
 );
+
+await engine.discardOperation('operation-1');
 
 final encoded = (await store.readAll()).map((record) => record.toJson());
 ```
