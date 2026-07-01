@@ -22,6 +22,7 @@ class SyncDrainResult {
     this.retryScheduledCount = 0,
     this.failedCount = 0,
     this.conflictedCount = 0,
+    this.reachedLimit = false,
   });
 
   /// Creates a completed drain summary.
@@ -31,6 +32,7 @@ class SyncDrainResult {
     this.retryScheduledCount = 0,
     this.failedCount = 0,
     this.conflictedCount = 0,
+    this.reachedLimit = false,
   }) : status = SyncDrainStatus.completed;
 
   /// Creates a skipped drain summary.
@@ -40,6 +42,7 @@ class SyncDrainResult {
       retryScheduledCount = 0,
       failedCount = 0,
       conflictedCount = 0,
+      reachedLimit = false,
       assert(status != SyncDrainStatus.completed);
 
   final SyncDrainStatus status;
@@ -48,6 +51,7 @@ class SyncDrainResult {
   final int retryScheduledCount;
   final int failedCount;
   final int conflictedCount;
+  final bool reachedLimit;
 
   bool get isCompleted => status == SyncDrainStatus.completed;
 
@@ -56,4 +60,6 @@ class SyncDrainResult {
   bool get didWork => processedCount > 0;
 
   bool get needsAttention => failedCount > 0 || conflictedCount > 0;
+
+  bool get shouldContinue => isCompleted && reachedLimit;
 }

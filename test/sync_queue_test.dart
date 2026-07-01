@@ -359,6 +359,122 @@ void main() {
     await engine.dispose();
   });
 
+  test('drain can process a bounded batch', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await engine.enqueue(
+      operation(id: 'first', createdAt: now),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'second', createdAt: now.add(const Duration(seconds: 1))),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'third', createdAt: now.add(const Duration(seconds: 2))),
+      syncImmediately: false,
+    );
+
+    final firstBatch = await engine.drain(maxOperations: 2);
+
+    expect(firstBatch.status, SyncDrainStatus.completed);
+    expect(firstBatch.processedCount, 2);
+    expect(firstBatch.succeededCount, 2);
+    expect(firstBatch.reachedLimit, isTrue);
+    expect(firstBatch.shouldContinue, isTrue);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'first',
+      'second',
+    ]);
+    final remaining = await store.readAll();
+    expect(remaining, hasLength(1));
+    expect(remaining.single.operation.id, 'third');
+    expect(remaining.single.status, SyncStatus.pending);
+
+    final secondBatch = await engine.drain(maxOperations: 2);
+
+    expect(secondBatch.processedCount, 1);
+    expect(secondBatch.succeededCount, 1);
+    expect(secondBatch.reachedLimit, isFalse);
+    expect(secondBatch.shouldContinue, isFalse);
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+  });
+
+  test('drain entity can process a bounded batch', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await engine.enqueue(
+      operation(id: 'task-first', entity: task, createdAt: now),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'task-second',
+        entity: task,
+        createdAt: now.add(const Duration(seconds: 1)),
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'invoice-work',
+        entity: invoice,
+        createdAt: now.add(const Duration(seconds: 2)),
+      ),
+      syncImmediately: false,
+    );
+
+    final result = await engine.drainEntity(task, maxOperations: 1);
+
+    expect(result.processedCount, 1);
+    expect(result.succeededCount, 1);
+    expect(result.reachedLimit, isTrue);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'task-first',
+    ]);
+    final remainingIds = (await store.readAll())
+        .map((record) => record.operation.id)
+        .toList();
+    expect(remainingIds, <String>['task-second', 'invoice-work']);
+
+    await engine.dispose();
+  });
+
+  test('drain rejects non-positive operation limits', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    expect(() => engine.drain(maxOperations: 0), throwsArgumentError);
+    expect(
+      () => engine.drainEntity(
+        const SyncEntityRef(type: 'task', id: 'task-1'),
+        maxOperations: -1,
+      ),
+      throwsArgumentError,
+    );
+
+    await engine.dispose();
+  });
+
   test('drain returns outcome counts for processed records', () async {
     final now = DateTime.utc(2026, 6, 30, 12);
     final store = InMemorySyncStore();

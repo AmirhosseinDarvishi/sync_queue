@@ -17,6 +17,7 @@ UI-friendly status streams.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
+- Limit drain passes for batched background sync.
 - Watch engine lifecycle state for sync spinners and debug panels.
 - Coalesce full drain requests that arrive while another drain is active.
 - Drain one due operation without draining unrelated work.
@@ -91,6 +92,11 @@ await SyncOptimistic.run(
 
 final drain = await engine.drain();
 print(drain.succeededCount);
+
+final batch = await engine.drain(maxOperations: 25);
+if (batch.shouldContinue) {
+  scheduleAnotherSyncPass();
+}
 
 engine.watchEngineState().listen((state) {
   if (state.isDraining) {

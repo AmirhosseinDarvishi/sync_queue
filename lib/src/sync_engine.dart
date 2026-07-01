@@ -399,11 +399,19 @@ class SyncEngine {
   }
 
   /// Sends due operations until the queue is caught up for the current moment.
-  Future<SyncDrainResult> drain({bool force = false}) async {
+  ///
+  /// Set [maxOperations] to process a bounded batch and continue later when
+  /// the returned result has `reachedLimit`.
+  Future<SyncDrainResult> drain({
+    bool force = false,
+    int? maxOperations,
+  }) async {
+    _validateMaxOperations(maxOperations);
     return _drainMatching(
       force: force,
       include: (_) => true,
       rerunWhenBusy: true,
+      maxOperations: maxOperations,
     );
   }
 
@@ -411,10 +419,13 @@ class SyncEngine {
   Future<SyncDrainResult> drainEntity(
     SyncEntityRef entity, {
     bool force = false,
+    int? maxOperations,
   }) async {
+    _validateMaxOperations(maxOperations);
     return _drainMatching(
       force: force,
       include: (record) => record.operation.entity == entity,
+      maxOperations: maxOperations,
     );
   }
 
@@ -433,6 +444,7 @@ class SyncEngine {
     required bool force,
     required bool Function(SyncRecord record) include,
     bool rerunWhenBusy = false,
+    int? maxOperations,
   }) async {
     if (_isDisposed) {
       return _skipDrain(SyncDrainStatus.skippedDisposed);
@@ -461,14 +473,27 @@ class SyncEngine {
       var failedCount = 0;
       var conflictedCount = 0;
       var processedCount = 0;
+      var reachedLimit = false;
       var currentInclude = include;
 
       do {
         _needsDrainRerun = false;
+        final remaining = maxOperations == null
+            ? null
+            : maxOperations - processedCount;
+        if (remaining != null && remaining <= 0) {
+          reachedLimit = true;
+          break;
+        }
+
         final dueAt = _clock();
-        final records = (await store.readPending(
+        final dueRecords = (await store.readPending(
           dueAt: dueAt,
         )).where(currentInclude).toList(growable: false);
+        final records = remaining == null || dueRecords.length <= remaining
+            ? dueRecords
+            : dueRecords.take(remaining).toList(growable: false);
+        reachedLimit = remaining != null && dueRecords.length > remaining;
         processedCount += records.length;
 
         for (final record in records) {
@@ -487,7 +512,7 @@ class SyncEngine {
         if (_needsDrainRerun) {
           currentInclude = (_) => true;
         }
-      } while (_needsDrainRerun && !_isDisposed);
+      } while (_needsDrainRerun && !_isDisposed && !reachedLimit);
 
       result = SyncDrainResult.completed(
         processedCount: processedCount,
@@ -495,6 +520,7 @@ class SyncEngine {
         retryScheduledCount: retryScheduledCount,
         failedCount: failedCount,
         conflictedCount: conflictedCount,
+        reachedLimit: reachedLimit,
       );
       return result;
     } finally {
@@ -527,6 +553,16 @@ class SyncEngine {
 
   Future<bool> _canDrain() async {
     return (await connectivity.status).isOnline;
+  }
+
+  void _validateMaxOperations(int? maxOperations) {
+    if (maxOperations != null && maxOperations < 1) {
+      throw ArgumentError.value(
+        maxOperations,
+        'maxOperations',
+        'Must be greater than zero.',
+      );
+    }
   }
 
   Future<_SyncProcessOutcome> _process(SyncRecord record) async {
