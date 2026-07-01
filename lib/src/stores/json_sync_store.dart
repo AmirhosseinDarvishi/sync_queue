@@ -29,8 +29,10 @@ abstract interface class SyncJsonQueryStorage implements SyncJsonStorage {
 /// strings, or encoded JSON blobs. Dedicated database adapters can build on top
 /// of the same model serializers without depending on this class.
 class JsonSyncStore implements SyncStore {
+  /// Creates a sync store that persists records through [storage].
   const JsonSyncStore(this.storage);
 
+  /// JSON-like persistence adapter used for encoded queue records.
   final SyncJsonStorage storage;
 
   @override

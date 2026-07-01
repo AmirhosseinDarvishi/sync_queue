@@ -46,14 +46,17 @@ class ManualSyncConnectivity implements SyncConnectivity {
   @override
   Stream<SyncConnectivityStatus> get changes => _changes.stream;
 
+  /// Marks the connection as online and emits a change when needed.
   void setOnline() {
     setStatus(SyncConnectivityStatus.online);
   }
 
+  /// Marks the connection as offline and emits a change when needed.
   void setOffline() {
     setStatus(SyncConnectivityStatus.offline);
   }
 
+  /// Updates the current connectivity [status] and notifies listeners.
   void setStatus(SyncConnectivityStatus status) {
     if (_status == status) {
       return;
@@ -63,6 +66,7 @@ class ManualSyncConnectivity implements SyncConnectivity {
     _changes.add(status);
   }
 
+  /// Closes the status stream.
   Future<void> dispose() async {
     await _changes.close();
   }

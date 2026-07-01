@@ -1,6 +1,6 @@
 ## Unreleased
 
-* No unreleased changes.
+* Improve dartdoc coverage for public sync, retry, storage, and conflict APIs.
 
 ## 0.1.0-dev.2
 

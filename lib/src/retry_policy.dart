@@ -3,6 +3,7 @@ typedef RetryJitter = double Function();
 
 /// Calculates retry delays for failed operations.
 class RetryPolicy {
+  /// Creates an exponential backoff policy for retryable failures.
   const RetryPolicy({
     this.maxAttempts = 3,
     this.baseDelay = const Duration(seconds: 2),
@@ -31,10 +32,12 @@ class RetryPolicy {
   /// delay. The default `0` keeps retry scheduling deterministic.
   final double jitterFactor;
 
+  /// Returns whether a failure with [attempts] should be retried.
   bool canRetry({required int attempts, required bool isRetryable}) {
     return isRetryable && attempts < maxAttempts;
   }
 
+  /// Calculates the delay before retrying after [attempts] failed attempts.
   Duration delayForAttempt(int attempts, {double jitter = 1}) {
     final delay = _baseDelayForAttempt(attempts);
     if (jitterFactor == 0 || delay == Duration.zero) {
