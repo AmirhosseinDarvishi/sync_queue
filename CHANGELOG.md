@@ -14,6 +14,7 @@
 * Add transport-provided retry delay support for failures.
 * Add jittered retry backoff support.
 * Add entity-scoped pending discard support.
+* Add entity record inspection helpers.
 
 ## 0.1.0-dev.1
 

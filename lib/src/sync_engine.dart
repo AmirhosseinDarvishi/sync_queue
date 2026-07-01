@@ -79,11 +79,16 @@ class SyncEngine {
 
   /// Reads an aggregated state snapshot for one entity.
   Future<SyncEntityState> readEntityState(SyncEntityRef entity) async {
+    return SyncEntityState.fromRecords(entity, await readEntityRecords(entity));
+  }
+
+  /// Reads queued records for one entity in UI priority order.
+  Future<List<SyncRecord>> readEntityRecords(SyncEntityRef entity) async {
     final records = await store.readAll();
     return SyncEntityState.fromRecords(
       entity,
       records.where((record) => record.operation.entity == entity),
-    );
+    ).records;
   }
 
   /// Emits an initial entity state, then emits a fresh snapshot on each change.
@@ -92,6 +97,15 @@ class SyncEngine {
 
     await for (final _ in watchEntity(entity)) {
       yield await readEntityState(entity);
+    }
+  }
+
+  /// Emits initial entity records, then fresh records on each entity change.
+  Stream<List<SyncRecord>> watchEntityRecords(SyncEntityRef entity) async* {
+    yield await readEntityRecords(entity);
+
+    await for (final _ in watchEntity(entity)) {
+      yield await readEntityRecords(entity);
     }
   }
 

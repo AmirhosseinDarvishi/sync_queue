@@ -1030,6 +1030,66 @@ void main() {
     await engine.dispose();
   });
 
+  test('read entity records returns prioritized entity records', () async {
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+    final entity = const SyncEntityRef(type: 'task', id: 'task-1');
+    final other = const SyncEntityRef(type: 'task', id: 'other-task');
+
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'pending',
+          entity: entity,
+          createdAt: DateTime.utc(2026),
+        ),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'failed',
+          entity: entity,
+          createdAt: DateTime.utc(2026, 1, 2),
+        ),
+        status: SyncStatus.failed,
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'conflicted',
+          entity: entity,
+          createdAt: DateTime.utc(2026, 1, 3),
+        ),
+        status: SyncStatus.conflicted,
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'other', entity: other),
+        status: SyncStatus.failed,
+      ),
+    );
+
+    final records = await engine.readEntityRecords(entity);
+    final missing = await engine.readEntityRecords(
+      const SyncEntityRef(type: 'task', id: 'missing'),
+    );
+
+    expect(records.map((record) => record.operation.id), <String>[
+      'conflicted',
+      'failed',
+      'pending',
+    ]);
+    expect(missing, isEmpty);
+
+    await engine.dispose();
+  });
+
   test('watch entity state emits initial and changed snapshots', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());
@@ -1051,6 +1111,33 @@ void main() {
 
     await Future<void>.delayed(Duration.zero);
     await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+    await expectation;
+
+    await engine.dispose();
+  });
+
+  test('watch entity records emits initial and changed records', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final entity = const SyncEntityRef(type: 'task', id: 'task-1');
+    final records = engine
+        .watchEntityRecords(entity)
+        .map((records) => records.map((record) => record.status).toList())
+        .take(4);
+    final expectation = expectLater(
+      records,
+      emitsInOrder(<List<SyncStatus>>[
+        <SyncStatus>[],
+        <SyncStatus>[SyncStatus.pending],
+        <SyncStatus>[SyncStatus.syncing],
+        <SyncStatus>[],
+      ]),
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    await engine.enqueue(operation(entity: entity), syncImmediately: false);
     await engine.drain();
     await expectation;
 
