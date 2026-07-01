@@ -286,6 +286,59 @@ void main() {
     await engine.dispose();
   });
 
+  test('drain entity sends only due work for one entity', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await engine.enqueue(
+      operation(id: 'task-due', entity: task),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'invoice-due', entity: invoice),
+      syncImmediately: false,
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'task-future',
+          entity: task,
+          createdAt: DateTime.utc(2026, 7, 1, 12, 1),
+        ),
+        nextAttemptAt: now.add(const Duration(minutes: 1)),
+      ),
+    );
+
+    final result = await engine.drainEntity(task);
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(result.status, SyncDrainStatus.completed);
+    expect(result.processedCount, 1);
+    expect(result.succeededCount, 1);
+    expect(result.didWork, isTrue);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'task-due',
+    ]);
+    expect(
+      records.keys,
+      unorderedEquals(<String>['invoice-due', 'task-future']),
+    );
+    expect(records['invoice-due']?.status, SyncStatus.pending);
+    expect(records['task-future']?.status, SyncStatus.pending);
+
+    await engine.dispose();
+  });
+
   test('retryable failures are rescheduled with backoff', () async {
     var now = DateTime(2026);
     final store = InMemorySyncStore();

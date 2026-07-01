@@ -345,6 +345,24 @@ class SyncEngine {
 
   /// Sends due operations until the queue is caught up for the current moment.
   Future<SyncDrainResult> drain({bool force = false}) async {
+    return _drainMatching(force: force, include: (_) => true);
+  }
+
+  /// Sends due operations for one entity without draining unrelated work.
+  Future<SyncDrainResult> drainEntity(
+    SyncEntityRef entity, {
+    bool force = false,
+  }) async {
+    return _drainMatching(
+      force: force,
+      include: (record) => record.operation.entity == entity,
+    );
+  }
+
+  Future<SyncDrainResult> _drainMatching({
+    required bool force,
+    required bool Function(SyncRecord record) include,
+  }) async {
     if (_isDisposed) {
       return const SyncDrainResult.skipped(SyncDrainStatus.skippedDisposed);
     }
@@ -362,7 +380,9 @@ class SyncEngine {
     _isDraining = true;
     try {
       final dueAt = _clock();
-      final records = await store.readPending(dueAt: dueAt);
+      final records = (await store.readPending(
+        dueAt: dueAt,
+      )).where(include).toList(growable: false);
       var succeededCount = 0;
       var retryScheduledCount = 0;
       var failedCount = 0;
