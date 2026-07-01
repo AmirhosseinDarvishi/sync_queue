@@ -91,6 +91,9 @@ class JsonSyncStore implements SyncStore {
 
 /// In-memory JSON storage for tests, demos, and custom prototypes.
 class InMemorySyncJsonStorage implements SyncJsonQueryStorage {
+  /// Creates an empty in-memory JSON storage adapter.
+  InMemorySyncJsonStorage();
+
   final _records = <String, SyncJsonMap>{};
 
   @override

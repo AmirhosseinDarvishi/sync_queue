@@ -18,6 +18,7 @@ abstract interface class SyncConnectivity {
 
 /// Default connectivity source for apps that want the engine to drain normally.
 class AlwaysOnlineSyncConnectivity implements SyncConnectivity {
+  /// Creates a connectivity source that always reports online.
   const AlwaysOnlineSyncConnectivity();
 
   @override
@@ -31,6 +32,7 @@ class AlwaysOnlineSyncConnectivity implements SyncConnectivity {
 
 /// Test and prototype connectivity source controlled by the caller.
 class ManualSyncConnectivity implements SyncConnectivity {
+  /// Creates a manually controlled connectivity source.
   ManualSyncConnectivity([
     SyncConnectivityStatus initialStatus = SyncConnectivityStatus.online,
   ]) : _status = initialStatus;

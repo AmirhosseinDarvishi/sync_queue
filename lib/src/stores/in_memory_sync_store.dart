@@ -3,6 +3,9 @@ import '../sync_store.dart';
 
 /// Non-persistent store for tests, prototypes, and examples.
 class InMemorySyncStore implements SyncStore {
+  /// Creates an empty in-memory sync store.
+  InMemorySyncStore();
+
   final Map<String, SyncRecord> _records = <String, SyncRecord>{};
 
   @override

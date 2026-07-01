@@ -18,6 +18,7 @@ import 'sync_operation_id_generator.dart';
 import 'sync_store.dart';
 import 'sync_transport.dart';
 
+/// Supplies the current time for records, retries, and deterministic tests.
 typedef Clock = DateTime Function();
 
 /// Creates timers used by [SyncEngine] for scheduled retries.

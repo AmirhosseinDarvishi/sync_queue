@@ -1,3 +1,4 @@
+/// A local-first sync queue for durable Flutter mutations.
 library;
 
 export 'src/models/sync_conflict_resolution.dart';
