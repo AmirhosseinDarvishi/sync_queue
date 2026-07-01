@@ -107,6 +107,34 @@ void main() {
     await engine.dispose();
   });
 
+  test('enqueue rejects duplicate operation ids', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(
+      operation(payload: const <String, Object?>{'title': 'First'}),
+      syncImmediately: false,
+    );
+
+    expect(
+      () => engine.enqueue(
+        operation(payload: const <String, Object?>{'title': 'Second'}),
+        syncImmediately: false,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final records = await store.readAll();
+    expect(records, hasLength(1));
+    expect(records.single.operation.payload, const <String, Object?>{
+      'title': 'First',
+    });
+    expect(transport.sent, isEmpty);
+
+    await engine.dispose();
+  });
+
   test('enqueue mutation generates operation ids through the engine', () async {
     final now = DateTime.utc(2026, 6, 30, 12);
     final store = InMemorySyncStore();
@@ -132,6 +160,40 @@ void main() {
     expect(record.operation.payload, const <String, Object?>{
       'title': 'Generated',
     });
+    await engine.dispose();
+  });
+
+  test('enqueue mutation rejects generated operation id collisions', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      operationIdGenerator: () => 'duplicate-op',
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'duplicate-op'),
+        status: SyncStatus.failed,
+      ),
+    );
+
+    expect(
+      () => engine.enqueueMutation(
+        entity: const SyncEntityRef(type: 'task', id: 'task-generated'),
+        type: SyncOperationType.update,
+        payload: const <String, Object?>{'title': 'Generated'},
+        syncImmediately: false,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final records = await store.readAll();
+    expect(records, hasLength(1));
+    expect(records.single.status, SyncStatus.failed);
+    expect(records.single.operation.id, 'duplicate-op');
+    expect(transport.sent, isEmpty);
+
     await engine.dispose();
   });
 

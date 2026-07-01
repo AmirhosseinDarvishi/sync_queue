@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Reject duplicate operation ids before queued work can be overwritten.
 * Preserve per-entity operation order during drain passes.
 * Add recovery for interrupted syncing operations after app restarts.
 * Improve dartdoc coverage for public sync, retry, storage, and conflict APIs.

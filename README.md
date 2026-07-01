@@ -8,6 +8,7 @@ UI-friendly status streams.
 
 - Queue create, update, delete, or custom operations.
 - Use create, update, and delete enqueue helpers for common mutations.
+- Reject duplicate operation ids before they overwrite queued work.
 - Keep only the latest pending mutation for noisy edit flows.
 - Update pending operations before they are sent.
 - Pair optimistic local changes with queue commit rollback.
@@ -136,6 +137,9 @@ final engine = SyncEngine(
 ```
 
 ## Queue Mutations
+
+Operation ids must be unique while they are in the queue. Duplicate ids are
+rejected before they can replace existing work.
 
 ```dart
 await engine.enqueueCreate(
