@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Preserve per-entity operation order during drain passes.
 * Add recovery for interrupted syncing operations after app restarts.
 * Improve dartdoc coverage for public sync, retry, storage, and conflict APIs.
 

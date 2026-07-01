@@ -742,17 +742,24 @@ class SyncEngine {
         }
 
         final dueAt = _clock();
-        final dueRecords = (await store.readPending(
+        final dueRecords = await _readRunnablePendingRecords(
           dueAt: dueAt,
-        )).where(currentInclude).toList(growable: false);
+          include: currentInclude,
+        );
         final records = remaining == null || dueRecords.length <= remaining
             ? dueRecords
             : dueRecords.take(remaining).toList(growable: false);
         reachedLimit = remaining != null && dueRecords.length > remaining;
-        processedCount += records.length;
 
+        final blockedEntities = <SyncEntityRef>{};
         for (final record in records) {
-          switch (await _process(record)) {
+          if (blockedEntities.contains(record.operation.entity)) {
+            continue;
+          }
+
+          final outcome = await _process(record);
+          processedCount += 1;
+          switch (outcome) {
             case _SyncProcessOutcome.succeeded:
               succeededCount += 1;
             case _SyncProcessOutcome.retryScheduled:
@@ -761,6 +768,10 @@ class SyncEngine {
               failedCount += 1;
             case _SyncProcessOutcome.conflicted:
               conflictedCount += 1;
+          }
+
+          if (outcome != _SyncProcessOutcome.succeeded) {
+            blockedEntities.add(record.operation.entity);
           }
         }
 
@@ -789,6 +800,53 @@ class SyncEngine {
       }
       await _scheduleNextPendingDrain();
     }
+  }
+
+  Future<List<SyncRecord>> _readRunnablePendingRecords({
+    required DateTime dueAt,
+    required bool Function(SyncRecord record) include,
+  }) async {
+    final duePendingRecords = await store.readPending(dueAt: dueAt);
+    if (duePendingRecords.isEmpty) {
+      return const <SyncRecord>[];
+    }
+
+    final duePendingIds = {
+      for (final record in duePendingRecords) record.operation.id,
+    };
+    final records = await store.readAll();
+    final blockedEntities = <SyncEntityRef>{};
+    final runnable = <SyncRecord>[];
+
+    for (final record in records) {
+      final entity = record.operation.entity;
+      if (blockedEntities.contains(entity)) {
+        continue;
+      }
+
+      switch (record.status) {
+        case SyncStatus.pending:
+          if (!duePendingIds.contains(record.operation.id)) {
+            blockedEntities.add(entity);
+            continue;
+          }
+
+          if (!include(record)) {
+            blockedEntities.add(entity);
+            continue;
+          }
+
+          runnable.add(record);
+        case SyncStatus.syncing:
+        case SyncStatus.failed:
+        case SyncStatus.conflicted:
+          blockedEntities.add(entity);
+        case SyncStatus.synced:
+          break;
+      }
+    }
+
+    return runnable;
   }
 
   Future<void> dispose() async {

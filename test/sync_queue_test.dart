@@ -684,10 +684,34 @@ void main() {
       clock: () => now,
     );
 
-    await engine.enqueue(operation(id: 'success'), syncImmediately: false);
-    await engine.enqueue(operation(id: 'retry'), syncImmediately: false);
-    await engine.enqueue(operation(id: 'fail'), syncImmediately: false);
-    await engine.enqueue(operation(id: 'conflict'), syncImmediately: false);
+    await engine.enqueue(
+      operation(
+        id: 'success',
+        entity: const SyncEntityRef(type: 'task', id: 'success'),
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'retry',
+        entity: const SyncEntityRef(type: 'task', id: 'retry'),
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'fail',
+        entity: const SyncEntityRef(type: 'task', id: 'fail'),
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'conflict',
+        entity: const SyncEntityRef(type: 'task', id: 'conflict'),
+      ),
+      syncImmediately: false,
+    );
 
     final result = await engine.drain();
 
@@ -716,6 +740,163 @@ void main() {
     );
     expect(records['fail']?.status, SyncStatus.failed);
     expect(records['conflict']?.status, SyncStatus.conflicted);
+
+    await engine.dispose();
+  });
+
+  test('drain preserves entity order after retryable failures', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((operation) async {
+      return operation.id == 'task-first'
+          ? const SyncResult.failure(SyncFailure(message: 'Offline'))
+          : const SyncResult.success();
+    });
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+      clock: () => now,
+    );
+
+    await engine.enqueue(
+      operation(id: 'task-first', entity: task, createdAt: now),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'task-second',
+        entity: task,
+        createdAt: now.add(const Duration(seconds: 1)),
+      ),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'invoice-work',
+        entity: invoice,
+        createdAt: now.add(const Duration(seconds: 2)),
+      ),
+      syncImmediately: false,
+    );
+
+    final result = await engine.drain();
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(result.processedCount, 2);
+    expect(result.retryScheduledCount, 1);
+    expect(result.succeededCount, 1);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'task-first',
+      'invoice-work',
+    ]);
+    expect(records['task-first']?.status, SyncStatus.pending);
+    expect(
+      records['task-first']?.nextAttemptAt,
+      now.add(const Duration(seconds: 5)),
+    );
+    expect(records['task-second']?.status, SyncStatus.pending);
+    expect(records.containsKey('invoice-work'), isFalse);
+
+    await engine.dispose();
+  });
+
+  test('older conflicted operations block newer entity work', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-conflict', entity: task, createdAt: now),
+        status: SyncStatus.conflicted,
+        conflict: const SyncConflict(message: 'Server changed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'task-newer',
+          entity: task,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'invoice-work',
+          entity: invoice,
+          createdAt: now.add(const Duration(seconds: 2)),
+        ),
+      ),
+    );
+
+    final result = await engine.drain();
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(result.processedCount, 1);
+    expect(result.succeededCount, 1);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'invoice-work',
+    ]);
+    expect(records['task-conflict']?.status, SyncStatus.conflicted);
+    expect(records['task-newer']?.status, SyncStatus.pending);
+    expect(records.containsKey('invoice-work'), isFalse);
+
+    await engine.dispose();
+  });
+
+  test('future retry attempts block newer entity work', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'retrying', entity: task, createdAt: now),
+        nextAttemptAt: now.add(const Duration(minutes: 5)),
+        lastFailure: const SyncFailure(message: 'Try later'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'newer',
+          entity: task,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+      ),
+    );
+
+    final result = await engine.drain();
+
+    expect(result.processedCount, 0);
+    expect(result.didWork, isFalse);
+    expect(transport.sent, isEmpty);
+    expect(
+      (await store.readAll()).map((record) => record.operation.id),
+      <String>['retrying', 'newer'],
+    );
 
     await engine.dispose();
   });
@@ -886,11 +1067,15 @@ void main() {
     );
 
     await engine.enqueue(
-      operation(id: 'task-due', entity: task),
+      operation(id: 'task-due', entity: task, createdAt: now),
       syncImmediately: false,
     );
     await engine.enqueue(
-      operation(id: 'invoice-due', entity: invoice),
+      operation(
+        id: 'invoice-due',
+        entity: invoice,
+        createdAt: now.add(const Duration(seconds: 1)),
+      ),
       syncImmediately: false,
     );
     await store.put(
@@ -898,7 +1083,7 @@ void main() {
         operation: operation(
           id: 'task-future',
           entity: task,
-          createdAt: DateTime.utc(2026, 7, 1, 12, 1),
+          createdAt: now.add(const Duration(seconds: 2)),
         ),
         nextAttemptAt: now.add(const Duration(minutes: 1)),
       ),
@@ -936,13 +1121,23 @@ void main() {
       clock: () => now,
     );
 
-    await engine.enqueue(operation(id: 'target'), syncImmediately: false);
-    await engine.enqueue(operation(id: 'other-due'), syncImmediately: false);
+    await engine.enqueue(
+      operation(id: 'target', createdAt: now),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(
+        id: 'other-due',
+        entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+        createdAt: now.add(const Duration(seconds: 1)),
+      ),
+      syncImmediately: false,
+    );
     await store.put(
       SyncRecord(
         operation: operation(
           id: 'future-target',
-          createdAt: DateTime.utc(2026, 7, 1, 12, 1),
+          createdAt: now.add(const Duration(seconds: 2)),
         ),
         nextAttemptAt: now.add(const Duration(minutes: 1)),
       ),

@@ -19,6 +19,7 @@ UI-friendly status streams.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
 - Limit drain passes for batched background sync.
+- Preserve operation order for each entity during drain passes.
 - Watch engine lifecycle state for sync spinners and debug panels.
 - Coalesce full drain requests that arrive while another drain is active.
 - Drain one due operation without draining unrelated work.
@@ -159,6 +160,10 @@ await SyncOptimistic.run(
 ```
 
 ## Draining
+
+Operations for the same entity are drained in creation order. If an older
+operation is failed, conflicted, syncing, or waiting for a future retry, newer
+operations for that entity wait behind it while unrelated entities can continue.
 
 ```dart
 final drain = await engine.drain();
