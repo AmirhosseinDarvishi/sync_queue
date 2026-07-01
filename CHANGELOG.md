@@ -1,5 +1,9 @@
 ## Unreleased
 
+* No unreleased changes.
+
+## 0.1.0-dev.3
+
 * Schedule retry timers only for runnable queued work.
 * Reject duplicate operation ids before queued work can be overwritten.
 * Preserve per-entity operation order during drain passes.
