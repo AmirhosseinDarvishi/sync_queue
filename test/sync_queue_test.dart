@@ -676,6 +676,33 @@ void main() {
     await expectation;
   });
 
+  test('dispose can be called repeatedly without throwing', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.dispose();
+    await engine.dispose();
+
+    expect(engine.engineState.status, SyncEngineStatus.disposed);
+  });
+
+  test('drain after dispose returns skipped disposed result', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.dispose();
+
+    final result = await engine.drain();
+
+    expect(result.status, SyncDrainStatus.skippedDisposed);
+    expect(result.wasSkipped, isTrue);
+    expect(engine.engineState.status, SyncEngineStatus.disposed);
+    expect(transport.sent, isEmpty);
+  });
+
   test(
     'drain reruns when another full drain is requested while active',
     () async {
@@ -2020,6 +2047,45 @@ void main() {
     },
   );
 
+  test(
+    'watch records scoped to one entity ignores unrelated entity changes',
+    () async {
+      final store = InMemorySyncStore();
+      final transport = FakeTransport((_) async => const SyncResult.success());
+      final engine = SyncEngine(store: store, transport: transport);
+      const task = SyncEntityRef(type: 'task', id: 'task-1');
+      const invoice = SyncEntityRef(type: 'invoice', id: 'invoice-1');
+      final snapshots = engine
+          .watchRecords(entity: task)
+          .map(
+            (records) => records.map((record) => record.operation.id).toList(),
+          )
+          .take(2);
+      final expectation = expectLater(
+        snapshots,
+        emitsInOrder(<List<String>>[
+          <String>[],
+          <String>['task-work'],
+        ]),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      await engine.enqueue(
+        operation(id: 'invoice-work', entity: invoice),
+        syncImmediately: false,
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      await engine.enqueue(
+        operation(id: 'task-work', entity: task),
+        syncImmediately: false,
+      );
+      await expectation;
+
+      await engine.dispose();
+    },
+  );
+
   test('watch entity state emits initial and changed snapshots', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());
@@ -2232,6 +2298,30 @@ void main() {
 
     await engine.dispose();
     await connectivity.dispose();
+  });
+
+  test('watch sync state can complete before engine disposal', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final states = engine
+        .watchSyncState()
+        .map((state) => state.queue.status)
+        .take(1);
+    final expectation = expectLater(
+      states,
+      emitsInOrder(<Object>[SyncQueueStatus.idle, emitsDone]),
+    );
+
+    await expectation;
+    await engine.enqueue(operation(), syncImmediately: false);
+
+    expect(
+      (await engine.readSyncState()).queue.status,
+      SyncQueueStatus.pending,
+    );
+
+    await engine.dispose();
   });
 
   test('conflict retry updates operation and returns it to pending', () async {
