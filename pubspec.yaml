@@ -1,6 +1,6 @@
 name: sync_queue
 description: "A local-first sync queue for Flutter apps with retries, conflict hooks, and UI-friendly sync status."
-version: 0.1.0-dev.1
+version: 0.1.0-dev.2
 repository: https://github.com/AmirhosseinDarvishi/sync_queue
 issue_tracker: https://github.com/AmirhosseinDarvishi/sync_queue/issues
 topics:
