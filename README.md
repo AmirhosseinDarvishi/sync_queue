@@ -37,6 +37,7 @@ UI-friendly status streams.
 - Inspect queued records for a specific entity.
 - Read aggregated entity sync state for badges and status rows.
 - Read queue-wide snapshots for global indicators and debug panels.
+- Watch combined sync state for app bars, badges, and debug panels.
 
 ## Getting started
 
@@ -130,6 +131,10 @@ final taskRecords = await engine.readEntityRecords(
 engine.watchQueueSnapshot().listen(
   (snapshot) => print(snapshot.status),
 );
+
+engine.watchSyncState().listen((state) {
+  print('${state.engine.status}: ${state.queue.status}');
+});
 
 await engine.resolveConflict(
   'operation-1',

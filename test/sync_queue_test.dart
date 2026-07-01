@@ -2009,6 +2009,68 @@ void main() {
     await engine.dispose();
   });
 
+  test('read sync state combines queue and engine snapshots', () async {
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'failed'),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Needs attention'),
+      ),
+    );
+
+    final snapshot = await engine.readSyncState();
+
+    expect(snapshot.engine.status, SyncEngineStatus.idle);
+    expect(snapshot.queue.status, SyncQueueStatus.failed);
+    expect(snapshot.isIdle, isFalse);
+    expect(snapshot.isSyncing, isFalse);
+    expect(snapshot.hasPendingWork, isFalse);
+    expect(snapshot.needsAttention, isTrue);
+    expect(snapshot.lastDrainWasSkipped, isFalse);
+
+    await engine.dispose();
+  });
+
+  test('watch sync state emits queue and engine lifecycle changes', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+    );
+    final states = engine
+        .watchSyncState()
+        .map(
+          (state) => '${state.queue.status.name}:${state.lastDrainWasSkipped}',
+        )
+        .take(3);
+    final expectation = expectLater(
+      states,
+      emitsInOrder(<String>['idle:false', 'pending:false', 'pending:true']),
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    await engine.enqueue(operation(), syncImmediately: false);
+    await Future<void>.delayed(Duration.zero);
+    await engine.drain();
+    await expectation;
+
+    final finalState = await engine.readSyncState();
+    expect(finalState.queue.status, SyncQueueStatus.pending);
+    expect(finalState.lastDrainWasSkipped, isTrue);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
+
   test('conflict retry updates operation and returns it to pending', () async {
     var sendCount = 0;
     final store = InMemorySyncStore();

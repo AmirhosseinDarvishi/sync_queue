@@ -11,6 +11,7 @@ import 'models/sync_operation.dart';
 import 'models/sync_queue_snapshot.dart';
 import 'models/sync_record.dart';
 import 'models/sync_result.dart';
+import 'models/sync_state_snapshot.dart';
 import 'retry_policy.dart';
 import 'sync_connectivity.dart';
 import 'sync_operation_id_generator.dart';
@@ -136,6 +137,56 @@ class SyncEngine {
 
     await for (final _ in events) {
       yield await readQueueSnapshot();
+    }
+  }
+
+  /// Reads a combined queue and engine lifecycle snapshot.
+  Future<SyncStateSnapshot> readSyncState() async {
+    return SyncStateSnapshot(
+      queue: await readQueueSnapshot(),
+      engine: engineState,
+    );
+  }
+
+  /// Emits initial sync state, then refreshes when queue or engine state changes.
+  Stream<SyncStateSnapshot> watchSyncState() async* {
+    yield await readSyncState();
+
+    final changes = StreamController<void>();
+    var openSources = 2;
+
+    void emitChange() {
+      if (!changes.isClosed) {
+        changes.add(null);
+      }
+    }
+
+    void markSourceDone() {
+      openSources -= 1;
+      if (openSources == 0 && !changes.isClosed) {
+        unawaited(changes.close());
+      }
+    }
+
+    final eventSubscription = events.listen(
+      (_) => emitChange(),
+      onDone: markSourceDone,
+    );
+    final engineSubscription = engineStates.listen(
+      (_) => emitChange(),
+      onDone: markSourceDone,
+    );
+
+    try {
+      await for (final _ in changes.stream) {
+        yield await readSyncState();
+      }
+    } finally {
+      await eventSubscription.cancel();
+      await engineSubscription.cancel();
+      if (!changes.isClosed) {
+        unawaited(changes.close());
+      }
     }
   }
 

@@ -24,6 +24,7 @@
 * Add bounded drain batches with continuation hints.
 * Add bulk failed-operation retry support.
 * Add bulk failed-operation discard support.
+* Add combined sync state snapshots for UI.
 
 ## 0.1.0-dev.1
 
