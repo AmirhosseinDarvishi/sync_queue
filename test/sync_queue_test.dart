@@ -597,6 +597,84 @@ void main() {
     await engine.dispose();
   });
 
+  test('discard pending for entity removes only pending entity work', () async {
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final emitted = <String>[];
+    final subscription = engine.events.listen(
+      (record) => emitted.add('${record.operation.id}:${record.status.name}'),
+    );
+
+    await engine.enqueue(
+      operation(id: 'task-pending-1', entity: task),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'task-pending-2', entity: task),
+      syncImmediately: false,
+    );
+    await engine.enqueue(
+      operation(id: 'invoice-pending', entity: invoice),
+      syncImmediately: false,
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Needs attention'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-conflicted', entity: task),
+        status: SyncStatus.conflicted,
+        conflict: const SyncConflict(message: 'Server changed'),
+      ),
+    );
+
+    final discarded = await engine.discardPendingForEntity(task);
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(discarded.map((record) => record.operation.id), <String>[
+      'task-pending-1',
+      'task-pending-2',
+    ]);
+    expect(
+      discarded.map((record) => record.status),
+      everyElement(SyncStatus.synced),
+    );
+    expect(
+      records.keys,
+      unorderedEquals(<String>[
+        'invoice-pending',
+        'task-failed',
+        'task-conflicted',
+      ]),
+    );
+    expect(records['invoice-pending']?.status, SyncStatus.pending);
+    expect(records['task-failed']?.status, SyncStatus.failed);
+    expect(records['task-conflicted']?.status, SyncStatus.conflicted);
+    expect(transport.sent, isEmpty);
+    expect(
+      emitted,
+      containsAllInOrder(<String>[
+        'task-pending-1:pending',
+        'task-pending-2:pending',
+        'invoice-pending:pending',
+        'task-pending-1:synced',
+        'task-pending-2:synced',
+      ]),
+    );
+
+    await subscription.cancel();
+    await engine.dispose();
+  });
+
   test('enqueue skips immediate drain while connectivity is offline', () async {
     final store = InMemorySyncStore();
     final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);

@@ -13,6 +13,7 @@
 * Add latest-mutation enqueueing for pending operation coalescing.
 * Add transport-provided retry delay support for failures.
 * Add jittered retry backoff support.
+* Add entity-scoped pending discard support.
 
 ## 0.1.0-dev.1
 

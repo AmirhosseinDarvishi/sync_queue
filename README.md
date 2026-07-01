@@ -23,6 +23,7 @@ UI-friendly status streams.
 - Surface conflicts instead of hiding them.
 - Retry failed operations after user action.
 - Discard queued operations before they are sent.
+- Discard pending work for a specific entity.
 - Watch per-entity sync status from Flutter UI.
 - Read aggregated entity sync state for badges and status rows.
 - Read queue-wide snapshots for global indicators and debug panels.
@@ -97,6 +98,10 @@ await engine.retryFailedOperation(
 );
 
 await engine.discardOperation('operation-1');
+
+await engine.discardPendingForEntity(
+  const SyncEntityRef(type: 'task', id: 'task-1'),
+);
 
 final encoded = (await store.readAll()).map((record) => record.toJson());
 ```

@@ -299,6 +299,36 @@ class SyncEngine {
     return discarded;
   }
 
+  /// Removes all pending operations for [entity] without sending them.
+  ///
+  /// Failed, conflicted, and syncing records are preserved because they need a
+  /// separate user or app-level decision.
+  Future<List<SyncRecord>> discardPendingForEntity(SyncEntityRef entity) async {
+    final records = await store.readAll();
+    final discarded = <SyncRecord>[];
+
+    for (final record in records) {
+      if (record.status != SyncStatus.pending ||
+          record.operation.entity != entity) {
+        continue;
+      }
+
+      final synced = record.copyWith(
+        status: SyncStatus.synced,
+        clearNextAttemptAt: true,
+        clearLastFailure: true,
+        clearConflict: true,
+        updatedAt: _clock(),
+      );
+      await store.delete(record.operation.id);
+      _emit(synced);
+      discarded.add(synced);
+    }
+
+    await _scheduleNextPendingDrain();
+    return discarded;
+  }
+
   /// Sends due operations until the queue is caught up for the current moment.
   Future<SyncDrainResult> drain({bool force = false}) async {
     if (_isDisposed) {
