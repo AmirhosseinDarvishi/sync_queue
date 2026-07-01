@@ -1,3 +1,6 @@
+/// Provides a normalized value used to spread retry delays.
+typedef RetryJitter = double Function();
+
 /// Calculates retry delays for failed operations.
 class RetryPolicy {
   const RetryPolicy({
@@ -5,8 +8,10 @@ class RetryPolicy {
     this.baseDelay = const Duration(seconds: 2),
     this.maxDelay = const Duration(minutes: 2),
     this.multiplier = 2,
+    this.jitterFactor = 0,
   }) : assert(maxAttempts > 0),
-       assert(multiplier >= 1);
+       assert(multiplier >= 1),
+       assert(jitterFactor >= 0 && jitterFactor <= 1);
 
   /// Total attempts, including the first immediate try.
   final int maxAttempts;
@@ -20,11 +25,31 @@ class RetryPolicy {
   /// Exponential multiplier applied per failure.
   final int multiplier;
 
+  /// Percentage of the calculated delay that can be randomized downward.
+  ///
+  /// A value of `0.2` spreads retries between 80% and 100% of the calculated
+  /// delay. The default `0` keeps retry scheduling deterministic.
+  final double jitterFactor;
+
   bool canRetry({required int attempts, required bool isRetryable}) {
     return isRetryable && attempts < maxAttempts;
   }
 
-  Duration delayForAttempt(int attempts) {
+  Duration delayForAttempt(int attempts, {double jitter = 1}) {
+    final delay = _baseDelayForAttempt(attempts);
+    if (jitterFactor == 0 || delay == Duration.zero) {
+      return delay;
+    }
+
+    final boundedJitter = jitter.clamp(0, 1).toDouble();
+    final delayMicros = delay.inMicroseconds;
+    final spreadMicros = (delayMicros * jitterFactor).round();
+    final minMicros = delayMicros - spreadMicros;
+    final jitteredMicros = minMicros + (spreadMicros * boundedJitter).round();
+    return Duration(microseconds: jitteredMicros);
+  }
+
+  Duration _baseDelayForAttempt(int attempts) {
     if (attempts <= 1) {
       return baseDelay;
     }

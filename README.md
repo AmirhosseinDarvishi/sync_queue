@@ -11,6 +11,7 @@ UI-friendly status streams.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
+- Add jitter to retry delays to avoid retry bursts.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
@@ -41,6 +42,7 @@ final engine = SyncEngine(
   store: store,
   transport: MyApiSyncTransport(),
   connectivity: connectivity,
+  retryPolicy: const RetryPolicy(jitterFactor: 0.2),
 );
 
 await engine.enqueue(

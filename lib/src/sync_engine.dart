@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'models/sync_conflict_resolution.dart';
 import 'models/sync_drain_result.dart';
@@ -32,9 +33,11 @@ class SyncEngine {
     this.autoDrainOnConnectivityRestored = true,
     this.autoDrainOnRetry = true,
     SyncTimerFactory? timerFactory,
+    RetryJitter? retryJitter,
     Clock? clock,
   }) : connectivity = connectivity ?? const AlwaysOnlineSyncConnectivity(),
        _timerFactory = timerFactory ?? Timer.new,
+       _retryJitter = retryJitter ?? math.Random().nextDouble,
        _clock = clock ?? DateTime.now {
     if (autoDrainOnConnectivityRestored) {
       _connectivitySubscription = this.connectivity.changes.listen((status) {
@@ -57,6 +60,7 @@ class SyncEngine {
   final bool autoDrainOnConnectivityRestored;
   final bool autoDrainOnRetry;
   final SyncTimerFactory _timerFactory;
+  final RetryJitter _retryJitter;
   final Clock _clock;
   final _events = StreamController<SyncRecord>.broadcast();
   StreamSubscription<SyncConnectivityStatus>? _connectivitySubscription;
@@ -429,7 +433,11 @@ class SyncEngine {
     }
 
     final retryDelay =
-        failure.retryAfter ?? retryPolicy.delayForAttempt(attempt.attempts);
+        failure.retryAfter ??
+        retryPolicy.delayForAttempt(
+          attempt.attempts,
+          jitter: retryPolicy.jitterFactor == 0 ? 1 : _retryJitter(),
+        );
     final retryAt = _clock().add(retryDelay);
     final pending = attempt.copyWith(
       status: SyncStatus.pending,

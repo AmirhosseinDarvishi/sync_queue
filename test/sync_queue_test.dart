@@ -317,6 +317,57 @@ void main() {
     await engine.dispose();
   });
 
+  test('retry policy can apply bounded jitter', () {
+    const policy = RetryPolicy(
+      baseDelay: Duration(seconds: 10),
+      multiplier: 2,
+      jitterFactor: 0.25,
+    );
+
+    expect(
+      policy.delayForAttempt(1, jitter: 0),
+      const Duration(milliseconds: 7500),
+    );
+    expect(
+      policy.delayForAttempt(1, jitter: 0.5),
+      const Duration(milliseconds: 8750),
+    );
+    expect(policy.delayForAttempt(1, jitter: 1), const Duration(seconds: 10));
+    expect(policy.delayForAttempt(2, jitter: 0), const Duration(seconds: 15));
+    expect(policy.delayForAttempt(2, jitter: 1), const Duration(seconds: 20));
+  });
+
+  test('retryable failures can jitter retry backoff', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final timers = FakeTimerFactory();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport(
+      (_) async =>
+          const SyncResult.failure(SyncFailure(message: 'Temporary outage')),
+    );
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(
+        baseDelay: Duration(seconds: 10),
+        jitterFactor: 0.5,
+      ),
+      retryJitter: () => 0.25,
+      timerFactory: timers.call,
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final retryDelay = const Duration(milliseconds: 6250);
+    final record = (await store.readAll()).single;
+    expect(record.nextAttemptAt, now.add(retryDelay));
+    expect(timers.timers.single.duration, retryDelay);
+
+    await engine.dispose();
+  });
+
   test('retryable failures can override backoff with retry after', () async {
     final now = DateTime.utc(2026, 7, 1, 12);
     final timers = FakeTimerFactory();
