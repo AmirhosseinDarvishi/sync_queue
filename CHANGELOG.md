@@ -1,5 +1,7 @@
 ## Unreleased
 
+* No unreleased changes.
+
 ## 0.1.0-dev.2
 
 * Add a JSON-backed sync store adapter.

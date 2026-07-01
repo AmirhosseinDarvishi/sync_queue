@@ -217,6 +217,6 @@ await engine.resolveConflict(
 
 ## Roadmap
 
-- Storage adapters for Drift and Hive.
-- Conflict resolver helpers.
+- Optional Drift and Hive adapter packages.
+- More conflict merge utilities for app-specific strategies.
 - Flutter widgets for sync badges and debug views.
