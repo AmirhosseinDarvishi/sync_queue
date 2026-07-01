@@ -41,16 +41,19 @@ UI-friendly status streams.
 - Read queue-wide snapshots for global indicators and debug panels.
 - Watch combined sync state for app bars, badges, and debug panels.
 
-## Getting started
+## Getting Started
 
-This first version intentionally keeps storage and networking abstract. Use the
-in-memory store for tests and prototypes, then add a real adapter for your app's
-database.
+`sync_queue` intentionally keeps storage and networking abstract. Your app owns
+the API client, local database, and connectivity source; the package owns queue
+state, retry timing, conflict surfacing, and UI-friendly snapshots.
+
+Use `InMemorySyncStore` for tests and prototypes, then replace it with
+`JsonSyncStore` or your own `SyncStore` adapter for production persistence.
 
 See `example/main.dart` for a complete fake API flow with offline queuing,
 optimistic updates, failed-operation retry, and conflict resolution.
 
-## Usage
+## Quick Start
 
 ```dart
 final store = InMemorySyncStore();
@@ -62,106 +65,140 @@ final engine = SyncEngine(
   retryPolicy: const RetryPolicy(jitterFactor: 0.2),
 );
 
-await engine.enqueue(
-  SyncOperation(
-    id: 'operation-1',
-    entity: const SyncEntityRef(type: 'task', id: 'task-1'),
-    type: SyncOperationType.update,
-    payload: const {'title': 'Ship the package'},
-  ),
-);
-
-await engine.enqueueMutation(
-  entity: const SyncEntityRef(type: 'task', id: 'task-2'),
-  type: SyncOperationType.update,
-  payload: const {'title': 'Generated operation id'},
-);
-
 await engine.enqueueUpdate(
   entity: const SyncEntityRef(type: 'task', id: 'task-2'),
-  payload: const {'title': 'Shortcut mutation'},
+  payload: const {'title': 'Ship the package'},
+);
+```
+
+## Transport Adapter
+
+Implement `SyncTransport` with your API client. Return success when the server
+accepts the operation, failure when it should retry or stop, and conflict when
+your app needs a merge decision.
+
+```dart
+class TaskSyncTransport implements SyncTransport {
+  TaskSyncTransport(this.api);
+
+  final TaskApi api;
+
+  @override
+  Future<SyncResult> send(SyncOperation operation) async {
+    try {
+      await api.sendTaskMutation(
+        id: operation.entity.id,
+        type: operation.type.wireName,
+        payload: operation.payload,
+      );
+      return const SyncResult.success();
+    } on VersionConflict catch (error) {
+      return SyncResult.conflict(
+        message: 'Server version changed.',
+        local: operation.payload,
+        remote: error.remotePayload,
+      );
+    } on RateLimited catch (error) {
+      return SyncResult.failure(
+        SyncFailure(
+          message: 'Rate limited.',
+          code: 'rate_limited',
+          retryAfter: error.retryAfter,
+        ),
+      );
+    }
+  }
+}
+```
+
+## Storage Adapter
+
+Use `JsonSyncStore` when your database can store maps, JSON blobs, or encoded
+records. Implement `SyncJsonQueryStorage` if your database can efficiently query
+due pending records.
+
+```dart
+final engine = SyncEngine(
+  store: JsonSyncStore(MyJsonStorage(database)),
+  transport: TaskSyncTransport(api),
+);
+```
+
+For tests, `InMemorySyncStore` is usually enough:
+
+```dart
+final engine = SyncEngine(
+  store: InMemorySyncStore(),
+  transport: FakeSyncTransport(),
+);
+```
+
+## Queue Mutations
+
+```dart
+await engine.enqueueCreate(
+  entity: const SyncEntityRef(type: 'task', id: 'task-1'),
+  payload: const {'title': 'New task'},
 );
 
 await engine.enqueueLatestMutation(
-  entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+  entity: const SyncEntityRef(type: 'task', id: 'task-1'),
   type: SyncOperationType.update,
   payload: const {'title': 'Only the latest pending update stays queued'},
 );
 
-await engine.updatePendingOperation(
-  'operation-1',
-  payload: const {'title': 'Edited before send'},
-);
-
 await SyncOptimistic.run(
   apply: () => updateLocalTaskTitle('task-1', 'Optimistic title'),
-  commit: () => engine.enqueueMutation(
+  commit: () => engine.enqueueUpdate(
     entity: const SyncEntityRef(type: 'task', id: 'task-1'),
-    type: SyncOperationType.update,
     payload: const {'title': 'Optimistic title'},
   ),
   rollback: (_, _) => updateLocalTaskTitle('task-1', 'Previous title'),
 );
+```
 
+## Draining
+
+```dart
 final drain = await engine.drain();
-print(drain.succeededCount);
-
 final batch = await engine.drain(maxOperations: 25);
+
 if (batch.shouldContinue) {
   scheduleAnotherSyncPass();
 }
-
-engine.watchEngineState().listen((state) {
-  if (state.isDraining) {
-    showSyncSpinner();
-  }
-});
 
 await engine.drainEntity(
   const SyncEntityRef(type: 'task', id: 'task-1'),
 );
 
 await engine.drainOperation('operation-1');
+```
 
-engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
-  (record) {
-    // pending, syncing, synced, failed, or conflicted
-    print(record.status);
-  },
-);
+## UI State
 
-engine.watchEntityState(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
-  (state) => print(state.status),
-);
+```dart
+engine.watchSyncState().listen((state) {
+  if (state.isSyncing) {
+    showSyncSpinner();
+  }
+
+  if (state.needsAttention) {
+    showSyncIssueBadge();
+  }
+});
 
 final taskRecords = await engine.readEntityRecords(
   const SyncEntityRef(type: 'task', id: 'task-1'),
 );
 
-final failedRecords = await engine.readRecords(
+final attentionRecords = await engine.readRecords(
   statuses: {SyncStatus.failed, SyncStatus.conflicted},
 );
+```
 
-engine.watchQueueSnapshot().listen(
-  (snapshot) => print(snapshot.status),
-);
+## Failures and Conflicts
 
-engine.watchSyncState().listen((state) {
-  print('${state.engine.status}: ${state.queue.status}');
-});
-
-await engine.resolveConflict(
-  'operation-1',
-  const SyncConflictResolution.retry(
-    payload: {'title': 'Merged title'},
-  ),
-);
-
-await engine.retryFailedOperation(
-  'operation-1',
-  payload: {'title': 'Try again'},
-);
-
+```dart
 await engine.retryFailedOperations(
   entity: const SyncEntityRef(type: 'task', id: 'task-1'),
 );
@@ -170,13 +207,12 @@ await engine.discardFailedOperations(
   entity: const SyncEntityRef(type: 'task', id: 'task-1'),
 );
 
-await engine.discardOperation('operation-1');
-
-await engine.discardPendingForEntity(
-  const SyncEntityRef(type: 'task', id: 'task-1'),
+await engine.resolveConflict(
+  'operation-1',
+  const SyncConflictResolution.retry(
+    payload: {'title': 'Merged title'},
+  ),
 );
-
-final encoded = (await store.readAll()).map((record) => record.toJson());
 ```
 
 ## Roadmap
