@@ -9,6 +9,7 @@ UI-friendly status streams.
 - Queue create, update, delete, or custom operations.
 - Keep only the latest pending mutation for noisy edit flows.
 - Update pending operations before they are sent.
+- Pair optimistic local changes with queue commit rollback.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
@@ -75,6 +76,16 @@ await engine.enqueueLatestMutation(
 await engine.updatePendingOperation(
   'operation-1',
   payload: const {'title': 'Edited before send'},
+);
+
+await SyncOptimistic.run(
+  apply: () => updateLocalTaskTitle('task-1', 'Optimistic title'),
+  commit: () => engine.enqueueMutation(
+    entity: const SyncEntityRef(type: 'task', id: 'task-1'),
+    type: SyncOperationType.update,
+    payload: const {'title': 'Optimistic title'},
+  ),
+  rollback: (_, _) => updateLocalTaskTitle('task-1', 'Previous title'),
 );
 
 final drain = await engine.drain();

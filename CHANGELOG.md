@@ -19,6 +19,7 @@
 * Add operation-scoped drain support.
 * Add full-drain reruns for drain requests received during active drains.
 * Add pending operation update support.
+* Add optimistic update helper with commit rollback.
 
 ## 0.1.0-dev.1
 

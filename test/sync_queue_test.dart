@@ -271,6 +271,60 @@ void main() {
     await engine.dispose();
   });
 
+  test('optimistic helper applies local change before queue commit', () async {
+    var title = 'Old';
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    final record = await SyncOptimistic.run<SyncRecord>(
+      apply: () {
+        title = 'New';
+      },
+      commit: () => engine.enqueueMutation(
+        entity: const SyncEntityRef(type: 'task', id: 'task-1'),
+        type: SyncOperationType.update,
+        payload: <String, Object?>{'title': title},
+        syncImmediately: false,
+      ),
+      rollback: (_, _) {
+        title = 'Old';
+      },
+    );
+
+    expect(title, 'New');
+    expect(record.operation.payload, const <String, Object?>{'title': 'New'});
+    expect(
+      (await store.readAll()).single.operation.payload,
+      const <String, Object?>{'title': 'New'},
+    );
+
+    await engine.dispose();
+  });
+
+  test('optimistic helper rolls back when commit fails', () async {
+    var title = 'Old';
+    final error = StateError('queue failed');
+
+    await expectLater(
+      SyncOptimistic.run<void>(
+        apply: () {
+          title = 'New';
+        },
+        commit: () async {
+          throw error;
+        },
+        rollback: (rollbackError, stackTrace) {
+          expect(rollbackError, same(error));
+          expect(stackTrace, isA<StackTrace>());
+          title = 'Old';
+        },
+      ),
+      throwsA(same(error)),
+    );
+    expect(title, 'Old');
+  });
+
   test('drain sends due operations and removes successful records', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());
