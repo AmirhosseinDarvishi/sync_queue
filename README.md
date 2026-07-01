@@ -36,6 +36,7 @@ UI-friendly status streams.
 - Discard pending work for a specific entity.
 - Watch per-entity sync status from Flutter UI.
 - Inspect queued records for a specific entity.
+- Filter queued records by entity and lifecycle status.
 - Read aggregated entity sync state for badges and status rows.
 - Read queue-wide snapshots for global indicators and debug panels.
 - Watch combined sync state for app bars, badges, and debug panels.
@@ -132,6 +133,10 @@ engine.watchEntityState(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
 
 final taskRecords = await engine.readEntityRecords(
   const SyncEntityRef(type: 'task', id: 'task-1'),
+);
+
+final failedRecords = await engine.readRecords(
+  statuses: {SyncStatus.failed, SyncStatus.conflicted},
 );
 
 engine.watchQueueSnapshot().listen(

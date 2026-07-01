@@ -94,6 +94,44 @@ class SyncEngine {
     return events.where((record) => record.operation.entity == entity);
   }
 
+  /// Reads queued records filtered by entity and/or lifecycle status.
+  Future<List<SyncRecord>> readRecords({
+    SyncEntityRef? entity,
+    Set<SyncStatus>? statuses,
+  }) async {
+    final records = (await store.readAll())
+        .where((record) {
+          if (entity != null && record.operation.entity != entity) {
+            return false;
+          }
+
+          if (statuses != null && !statuses.contains(record.status)) {
+            return false;
+          }
+
+          return true;
+        })
+        .toList(growable: false);
+    records.sort(_compareRecordsByCreatedAt);
+    return records;
+  }
+
+  /// Emits initial filtered records, then refreshes on matching entity changes.
+  ///
+  /// Status transitions are not filtered before refresh, so records leaving the
+  /// requested [statuses] still cause a fresh list to be emitted.
+  Stream<List<SyncRecord>> watchRecords({
+    SyncEntityRef? entity,
+    Set<SyncStatus>? statuses,
+  }) async* {
+    yield await readRecords(entity: entity, statuses: statuses);
+
+    final source = entity == null ? events : watchEntity(entity);
+    await for (final _ in source) {
+      yield await readRecords(entity: entity, statuses: statuses);
+    }
+  }
+
   /// Reads an aggregated state snapshot for one entity.
   Future<SyncEntityState> readEntityState(SyncEntityRef entity) async {
     return SyncEntityState.fromRecords(entity, await readEntityRecords(entity));
@@ -926,6 +964,10 @@ class SyncEngine {
     _retryTimer?.cancel();
     _retryTimer = null;
     _scheduledRetryAt = null;
+  }
+
+  int _compareRecordsByCreatedAt(SyncRecord left, SyncRecord right) {
+    return left.operation.createdAt.compareTo(right.operation.createdAt);
   }
 }
 

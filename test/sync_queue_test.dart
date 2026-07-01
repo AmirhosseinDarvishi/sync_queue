@@ -1911,6 +1911,115 @@ void main() {
     await engine.dispose();
   });
 
+  test('read records can filter by status and entity', () async {
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+    const task = SyncEntityRef(type: 'task', id: 'task-1');
+    const invoice = SyncEntityRef(type: 'invoice', id: 'invoice-1');
+
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'pending-task',
+          entity: task,
+          createdAt: DateTime.utc(2026, 1, 3),
+        ),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'failed-invoice',
+          entity: invoice,
+          createdAt: DateTime.utc(2026, 1),
+        ),
+        status: SyncStatus.failed,
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'conflicted-task',
+          entity: task,
+          createdAt: DateTime.utc(2026, 1, 2),
+        ),
+        status: SyncStatus.conflicted,
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'failed-task',
+          entity: task,
+          createdAt: DateTime.utc(2026, 1, 4),
+        ),
+        status: SyncStatus.failed,
+      ),
+    );
+
+    final attentionRecords = await engine.readRecords(
+      statuses: {SyncStatus.failed, SyncStatus.conflicted},
+    );
+    final taskFailures = await engine.readRecords(
+      entity: task,
+      statuses: {SyncStatus.failed},
+    );
+    final empty = await engine.readRecords(statuses: <SyncStatus>{});
+
+    expect(attentionRecords.map((record) => record.operation.id), <String>[
+      'failed-invoice',
+      'conflicted-task',
+      'failed-task',
+    ]);
+    expect(taskFailures.map((record) => record.operation.id), <String>[
+      'failed-task',
+    ]);
+    expect(empty, isEmpty);
+
+    await engine.dispose();
+  });
+
+  test(
+    'watch records refreshes when records leave the status filter',
+    () async {
+      final store = InMemorySyncStore();
+      final transport = FakeTransport((_) async => const SyncResult.success());
+      final engine = SyncEngine(store: store, transport: transport);
+
+      await store.put(
+        SyncRecord(
+          operation: operation(id: 'failed'),
+          status: SyncStatus.failed,
+          attempts: 1,
+          lastFailure: const SyncFailure(message: 'Needs retry'),
+        ),
+      );
+
+      final records = engine
+          .watchRecords(statuses: {SyncStatus.failed})
+          .map(
+            (records) => records.map((record) => record.operation.id).toList(),
+          )
+          .take(2);
+      final expectation = expectLater(
+        records,
+        emitsInOrder(<List<String>>[
+          <String>['failed'],
+          <String>[],
+        ]),
+      );
+
+      await Future<void>.delayed(Duration.zero);
+      await engine.retryFailedOperation('failed', syncImmediately: false);
+      await expectation;
+
+      await engine.dispose();
+    },
+  );
+
   test('watch entity state emits initial and changed snapshots', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());

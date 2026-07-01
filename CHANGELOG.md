@@ -26,6 +26,7 @@
 * Add bulk failed-operation discard support.
 * Add combined sync state snapshots for UI.
 * Add create, update, and delete enqueue helpers.
+* Add filtered record read and watch helpers.
 
 ## 0.1.0-dev.1
 
