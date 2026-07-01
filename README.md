@@ -17,6 +17,7 @@ UI-friendly status streams.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
+- Watch engine lifecycle state for sync spinners and debug panels.
 - Coalesce full drain requests that arrive while another drain is active.
 - Drain one due operation without draining unrelated work.
 - Drain due work for a specific entity.
@@ -91,6 +92,12 @@ await SyncOptimistic.run(
 final drain = await engine.drain();
 print(drain.succeededCount);
 
+engine.watchEngineState().listen((state) {
+  if (state.isDraining) {
+    showSyncSpinner();
+  }
+});
+
 await engine.drainEntity(
   const SyncEntityRef(type: 'task', id: 'task-1'),
 );
@@ -141,5 +148,4 @@ final encoded = (await store.readAll()).map((record) => record.toJson());
 
 - Storage adapters for Drift and Hive.
 - Conflict resolver helpers.
-- Optimistic update helpers.
 - Flutter widgets for sync badges and debug views.

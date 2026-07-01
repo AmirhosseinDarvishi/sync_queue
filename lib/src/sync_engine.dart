@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'models/sync_conflict_resolution.dart';
 import 'models/sync_drain_result.dart';
+import 'models/sync_engine_state.dart';
 import 'models/sync_entity_ref.dart';
 import 'models/sync_entity_state.dart';
 import 'models/sync_failure.dart';
@@ -63,6 +64,8 @@ class SyncEngine {
   final RetryJitter _retryJitter;
   final Clock _clock;
   final _events = StreamController<SyncRecord>.broadcast();
+  final _engineStates = StreamController<SyncEngineState>.broadcast();
+  var _engineState = const SyncEngineState.idle();
   StreamSubscription<SyncConnectivityStatus>? _connectivitySubscription;
   Timer? _retryTimer;
   DateTime? _scheduledRetryAt;
@@ -72,6 +75,18 @@ class SyncEngine {
 
   /// Emits every record transition processed by this engine.
   Stream<SyncRecord> get events => _events.stream;
+
+  /// Current lifecycle state for this engine.
+  SyncEngineState get engineState => _engineState;
+
+  /// Emits lifecycle transitions for this engine.
+  Stream<SyncEngineState> get engineStates => _engineStates.stream;
+
+  /// Emits the current engine state, then future lifecycle transitions.
+  Stream<SyncEngineState> watchEngineState() async* {
+    yield engineState;
+    yield* engineStates;
+  }
 
   /// Emits transitions for a specific domain entity.
   Stream<SyncRecord> watchEntity(SyncEntityRef entity) {
@@ -420,7 +435,7 @@ class SyncEngine {
     bool rerunWhenBusy = false,
   }) async {
     if (_isDisposed) {
-      return const SyncDrainResult.skipped(SyncDrainStatus.skippedDisposed);
+      return _skipDrain(SyncDrainStatus.skippedDisposed);
     }
 
     if (_isDraining) {
@@ -428,16 +443,18 @@ class SyncEngine {
         _needsDrainRerun = true;
       }
 
-      return const SyncDrainResult.skipped(
-        SyncDrainStatus.skippedAlreadyDraining,
-      );
+      return _skipDrain(SyncDrainStatus.skippedAlreadyDraining);
     }
 
     if (!force && !await _canDrain()) {
-      return const SyncDrainResult.skipped(SyncDrainStatus.skippedOffline);
+      return _skipDrain(SyncDrainStatus.skippedOffline);
     }
 
     _isDraining = true;
+    SyncDrainResult? result;
+    _setEngineState(
+      SyncEngineState.draining(lastDrainResult: _engineState.lastDrainResult),
+    );
     try {
       var succeededCount = 0;
       var retryScheduledCount = 0;
@@ -472,23 +489,39 @@ class SyncEngine {
         }
       } while (_needsDrainRerun && !_isDisposed);
 
-      return SyncDrainResult.completed(
+      result = SyncDrainResult.completed(
         processedCount: processedCount,
         succeededCount: succeededCount,
         retryScheduledCount: retryScheduledCount,
         failedCount: failedCount,
         conflictedCount: conflictedCount,
       );
+      return result;
     } finally {
       _isDraining = false;
+      if (!_isDisposed) {
+        _setEngineState(
+          SyncEngineState.idle(
+            lastDrainResult: result ?? _engineState.lastDrainResult,
+          ),
+        );
+      }
       await _scheduleNextPendingDrain();
     }
   }
 
   Future<void> dispose() async {
+    if (_isDisposed) {
+      return;
+    }
+
     _isDisposed = true;
     await _connectivitySubscription?.cancel();
     _cancelRetryTimer();
+    _setEngineState(
+      SyncEngineState.disposed(lastDrainResult: _engineState.lastDrainResult),
+    );
+    await _engineStates.close();
     await _events.close();
   }
 
@@ -606,6 +639,19 @@ class SyncEngine {
   void _emit(SyncRecord record) {
     if (!_isDisposed) {
       _events.add(record);
+    }
+  }
+
+  SyncDrainResult _skipDrain(SyncDrainStatus status) {
+    final result = SyncDrainResult.skipped(status);
+    _setEngineState(_engineState.copyWith(lastDrainResult: result));
+    return result;
+  }
+
+  void _setEngineState(SyncEngineState state) {
+    _engineState = state;
+    if (!_engineStates.isClosed) {
+      _engineStates.add(state);
     }
   }
 

@@ -418,6 +418,94 @@ void main() {
     await engine.dispose();
   });
 
+  test('watch engine state emits drain lifecycle snapshots', () async {
+    final store = InMemorySyncStore();
+    final started = Completer<void>();
+    final release = Completer<SyncResult>();
+    final transport = FakeTransport((_) {
+      if (!started.isCompleted) {
+        started.complete();
+      }
+      return release.future;
+    });
+    final engine = SyncEngine(store: store, transport: transport);
+    final states = engine
+        .watchEngineState()
+        .map((state) => state.status)
+        .take(3);
+    final expectation = expectLater(
+      states,
+      emitsInOrder(<SyncEngineStatus>[
+        SyncEngineStatus.idle,
+        SyncEngineStatus.draining,
+        SyncEngineStatus.idle,
+      ]),
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    await engine.enqueue(operation(), syncImmediately: false);
+    final drain = engine.drain();
+
+    await started.future;
+    expect(engine.engineState.status, SyncEngineStatus.draining);
+    expect(engine.engineState.isDraining, isTrue);
+
+    release.complete(const SyncResult.success());
+    final result = await drain;
+
+    expect(engine.engineState.status, SyncEngineStatus.idle);
+    expect(engine.engineState.lastDrainResult, same(result));
+    expect(engine.engineState.hasLastDrainResult, isTrue);
+    await expectation;
+
+    await engine.dispose();
+  });
+
+  test('engine state remembers skipped drain results', () async {
+    final store = InMemorySyncStore();
+    final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      connectivity: connectivity,
+    );
+
+    final result = await engine.drain();
+
+    expect(result.status, SyncDrainStatus.skippedOffline);
+    expect(engine.engineState.status, SyncEngineStatus.idle);
+    expect(engine.engineState.lastDrainResult, same(result));
+    expect(engine.engineState.lastDrainWasSkipped, isTrue);
+
+    await engine.dispose();
+    await connectivity.dispose();
+  });
+
+  test('watch engine state emits disposed snapshots', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+    final states = engine
+        .watchEngineState()
+        .map((state) => state.status)
+        .take(2);
+    final expectation = expectLater(
+      states,
+      emitsInOrder(<SyncEngineStatus>[
+        SyncEngineStatus.idle,
+        SyncEngineStatus.disposed,
+      ]),
+    );
+
+    await Future<void>.delayed(Duration.zero);
+    await engine.dispose();
+
+    expect(engine.engineState.status, SyncEngineStatus.disposed);
+    expect(engine.engineState.isDisposed, isTrue);
+    await expectation;
+  });
+
   test(
     'drain reruns when another full drain is requested while active',
     () async {
