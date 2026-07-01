@@ -80,6 +80,7 @@ void main() {
     Map<String, Object?> payload = const <String, Object?>{
       'title': 'Ship package',
     },
+    Map<String, Object?> headers = const <String, Object?>{},
     DateTime? createdAt,
   }) {
     return SyncOperation(
@@ -87,6 +88,7 @@ void main() {
       entity: entity,
       type: SyncOperationType.update,
       payload: payload,
+      headers: headers,
       createdAt: createdAt,
     );
   }
@@ -189,6 +191,82 @@ void main() {
     );
     expect(records['failed-task']?.status, SyncStatus.failed);
     expect(transport.sent, isEmpty);
+
+    await engine.dispose();
+  });
+
+  test('pending operations can be updated before sending', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          payload: const <String, Object?>{'title': 'Old'},
+          headers: const <String, Object?>{'route': 'old'},
+        ),
+        attempts: 2,
+        nextAttemptAt: now.add(const Duration(minutes: 1)),
+        lastFailure: const SyncFailure(message: 'Temporary outage'),
+      ),
+    );
+
+    final updated = await engine.updatePendingOperation(
+      'op-1',
+      payload: const <String, Object?>{'title': 'Updated'},
+      headers: const <String, Object?>{'route': 'new'},
+      syncImmediately: false,
+    );
+    final stored = (await store.readAll()).single;
+
+    expect(updated?.status, SyncStatus.pending);
+    expect(updated?.attempts, 0);
+    expect(updated?.nextAttemptAt, isNull);
+    expect(updated?.lastFailure, isNull);
+    expect(updated?.updatedAt, now);
+    expect(stored.operation.payload, const <String, Object?>{
+      'title': 'Updated',
+    });
+    expect(stored.operation.headers, const <String, Object?>{'route': 'new'});
+    expect(transport.sent, isEmpty);
+
+    await engine.drain();
+
+    expect(transport.sent, hasLength(1));
+    expect(transport.sent.single.payload, const <String, Object?>{
+      'title': 'Updated',
+    });
+    expect(transport.sent.single.headers, const <String, Object?>{
+      'route': 'new',
+    });
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+  });
+
+  test('pending operation update rejects non-pending records', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await store.put(
+      SyncRecord(operation: operation(), status: SyncStatus.syncing),
+    );
+
+    expect(
+      () => engine.updatePendingOperation('op-1', syncImmediately: false),
+      throwsA(isA<StateError>()),
+    );
+    expect(
+      await engine.updatePendingOperation('missing', syncImmediately: false),
+      isNull,
+    );
 
     await engine.dispose();
   });

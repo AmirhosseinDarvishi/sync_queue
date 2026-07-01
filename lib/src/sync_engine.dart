@@ -181,6 +181,45 @@ class SyncEngine {
     return enqueue(operation, syncImmediately: syncImmediately);
   }
 
+  /// Updates a pending operation before it is sent.
+  ///
+  /// Returns `null` when the operation is no longer in the queue.
+  Future<SyncRecord?> updatePendingOperation(
+    String operationId, {
+    Map<String, Object?>? payload,
+    Map<String, Object?>? headers,
+    bool resetAttempts = true,
+    bool syncImmediately = true,
+  }) async {
+    final record = await store.read(operationId);
+    if (record == null) {
+      return null;
+    }
+
+    if (record.status != SyncStatus.pending) {
+      throw StateError('Operation "$operationId" is not pending.');
+    }
+
+    final pending = record.copyWith(
+      operation: record.operation.copyWith(
+        payload: payload ?? record.operation.payload,
+        headers: headers ?? record.operation.headers,
+      ),
+      attempts: resetAttempts ? 0 : record.attempts,
+      clearNextAttemptAt: true,
+      clearLastFailure: true,
+      clearConflict: true,
+      updatedAt: _clock(),
+    );
+    await _saveAndEmit(pending);
+
+    if (syncImmediately) {
+      await drain();
+    }
+
+    return pending;
+  }
+
   /// Resolves a conflicted operation using an app-provided decision.
   ///
   /// Returns `null` when the operation is no longer in the queue.
