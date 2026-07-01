@@ -317,6 +317,39 @@ void main() {
     await engine.dispose();
   });
 
+  test('retryable failures can override backoff with retry after', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final timers = FakeTimerFactory();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport(
+      (_) async => const SyncResult.failure(
+        SyncFailure(
+          message: 'Rate limited',
+          code: 'rate_limited',
+          retryAfter: Duration(seconds: 30),
+        ),
+      ),
+    );
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+      timerFactory: timers.call,
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    await engine.drain();
+
+    final record = (await store.readAll()).single;
+    expect(record.status, SyncStatus.pending);
+    expect(record.nextAttemptAt, now.add(const Duration(seconds: 30)));
+    expect(record.lastFailure?.retryAfter, const Duration(seconds: 30));
+    expect(timers.timers.single.duration, const Duration(seconds: 30));
+
+    await engine.dispose();
+  });
+
   test(
     'retryable failures automatically drain when retry timer fires',
     () async {
@@ -649,6 +682,7 @@ void main() {
       lastFailure: const SyncFailure(
         message: 'Temporary outage',
         code: 'network',
+        retryAfter: Duration(seconds: 30),
       ),
       updatedAt: updatedAt,
     );
@@ -661,6 +695,7 @@ void main() {
     expect(restored.nextAttemptAt, nextAttemptAt);
     expect(restored.lastFailure?.message, 'Temporary outage');
     expect(restored.lastFailure?.code, 'network');
+    expect(restored.lastFailure?.retryAfter, const Duration(seconds: 30));
     expect(restored.updatedAt, updatedAt);
   });
 

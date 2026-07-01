@@ -11,6 +11,7 @@ UI-friendly status streams.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
 - Retry failed operations with exponential backoff.
+- Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
 - Pause automatic draining while offline.

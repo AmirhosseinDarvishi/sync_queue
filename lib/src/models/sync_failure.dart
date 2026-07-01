@@ -6,6 +6,7 @@ class SyncFailure {
     required this.message,
     this.code,
     this.isRetryable = true,
+    this.retryAfter,
     this.cause,
   });
 
@@ -18,6 +19,9 @@ class SyncFailure {
   /// Whether the operation can be retried.
   final bool isRetryable;
 
+  /// Optional transport-provided delay before the next retry attempt.
+  final Duration? retryAfter;
+
   /// Original exception or response object, when available.
   final Object? cause;
 
@@ -26,6 +30,7 @@ class SyncFailure {
       message: readString(json, 'message'),
       code: readOptionalString(json, 'code'),
       isRetryable: readBool(json, 'isRetryable'),
+      retryAfter: _readOptionalDuration(json, 'retryAfterMs'),
     );
   }
 
@@ -34,6 +39,7 @@ class SyncFailure {
       'message': message,
       'code': code,
       'isRetryable': isRetryable,
+      'retryAfterMs': retryAfter?.inMilliseconds,
     };
   }
 
@@ -45,4 +51,17 @@ class SyncFailure {
 
     return '$code: $message';
   }
+}
+
+Duration? _readOptionalDuration(SyncJsonMap json, String key) {
+  final value = json[key];
+  if (value == null) {
+    return null;
+  }
+
+  if (value is int) {
+    return Duration(milliseconds: value);
+  }
+
+  throw FormatException('Expected "$key" to be an integer or null.');
 }

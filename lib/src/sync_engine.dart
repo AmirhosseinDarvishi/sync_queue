@@ -428,7 +428,9 @@ class SyncEngine {
       return _SyncProcessOutcome.failed;
     }
 
-    final retryAt = _clock().add(retryPolicy.delayForAttempt(attempt.attempts));
+    final retryDelay =
+        failure.retryAfter ?? retryPolicy.delayForAttempt(attempt.attempts);
+    final retryAt = _clock().add(retryDelay);
     final pending = attempt.copyWith(
       status: SyncStatus.pending,
       nextAttemptAt: retryAt,

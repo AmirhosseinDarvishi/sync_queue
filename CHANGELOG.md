@@ -11,6 +11,7 @@
 * Add manual retry support for failed operations.
 * Add manual discard support for queued operations.
 * Add latest-mutation enqueueing for pending operation coalescing.
+* Add transport-provided retry delay support for failures.
 
 ## 0.1.0-dev.1
 
