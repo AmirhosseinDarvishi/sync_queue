@@ -1363,6 +1363,65 @@ void main() {
     expect(policy.delayForAttempt(2, jitter: 1), const Duration(seconds: 20));
   });
 
+  test('transport send timeouts are retried with backoff', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final timers = FakeTimerFactory();
+    final send = Completer<SyncResult>();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) => send.future);
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(baseDelay: Duration(seconds: 5)),
+      sendTimeout: Duration.zero,
+      timerFactory: timers.call,
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    final result = await engine.drain();
+
+    final record = (await store.readAll()).single;
+    expect(result.retryScheduledCount, 1);
+    expect(record.status, SyncStatus.pending);
+    expect(record.attempts, 1);
+    expect(record.lastFailure?.code, 'timeout');
+    expect(record.lastFailure?.isRetryable, isTrue);
+    expect(record.nextAttemptAt, now.add(const Duration(seconds: 5)));
+    expect(timers.timers.single.duration, const Duration(seconds: 5));
+    expect(send.isCompleted, isFalse);
+
+    await engine.dispose();
+  });
+
+  test('transport send timeouts can become final failures', () async {
+    final send = Completer<SyncResult>();
+    final timers = FakeTimerFactory();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) => send.future);
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      retryPolicy: const RetryPolicy(maxAttempts: 1),
+      sendTimeout: Duration.zero,
+      timerFactory: timers.call,
+    );
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    final result = await engine.drain();
+
+    final record = (await store.readAll()).single;
+    expect(result.failedCount, 1);
+    expect(record.status, SyncStatus.failed);
+    expect(record.attempts, 1);
+    expect(record.lastFailure?.code, 'timeout');
+    expect(record.nextAttemptAt, isNull);
+    expect(timers.timers, isEmpty);
+    expect(send.isCompleted, isFalse);
+
+    await engine.dispose();
+  });
+
   test('retryable failures can jitter retry backoff', () async {
     final now = DateTime.utc(2026, 7, 1, 12);
     final timers = FakeTimerFactory();

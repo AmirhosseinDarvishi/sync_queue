@@ -33,6 +33,7 @@ class SyncEngine {
     SyncConnectivity? connectivity,
     this.operationIdGenerator = SyncOperationIds.generate,
     this.retryPolicy = const RetryPolicy(),
+    this.sendTimeout,
     this.autoDrainOnConnectivityRestored = true,
     this.autoDrainOnRetry = true,
     SyncTimerFactory? timerFactory,
@@ -42,6 +43,9 @@ class SyncEngine {
        _timerFactory = timerFactory ?? Timer.new,
        _retryJitter = retryJitter ?? math.Random().nextDouble,
        _clock = clock ?? DateTime.now {
+    final timeout = sendTimeout;
+    assert(timeout == null || !timeout.isNegative);
+
     if (autoDrainOnConnectivityRestored) {
       _connectivitySubscription = this.connectivity.changes.listen((status) {
         if (status.isOnline) {
@@ -60,6 +64,10 @@ class SyncEngine {
   final SyncConnectivity connectivity;
   final SyncOperationIdGenerator operationIdGenerator;
   final RetryPolicy retryPolicy;
+
+  /// Maximum time to wait for one transport send before treating it as failed.
+  final Duration? sendTimeout;
+
   final bool autoDrainOnConnectivityRestored;
   final bool autoDrainOnRetry;
   final SyncTimerFactory _timerFactory;
@@ -897,7 +905,7 @@ class SyncEngine {
     await _saveAndEmit(attempt);
 
     try {
-      final result = await transport.send(attempt.operation);
+      final result = await _send(attempt.operation);
       return await _applyResult(attempt, result);
     } on Object catch (error) {
       return await _handleFailure(
@@ -905,6 +913,25 @@ class SyncEngine {
         SyncFailure(message: error.toString(), cause: error),
       );
     }
+  }
+
+  Future<SyncResult> _send(SyncOperation operation) {
+    final send = transport.send(operation);
+    final timeout = sendTimeout;
+    if (timeout == null) {
+      return send;
+    }
+
+    return send.timeout(
+      timeout,
+      onTimeout: () => SyncResult.failure(
+        SyncFailure(
+          message: 'Sync operation timed out.',
+          code: 'timeout',
+          isRetryable: true,
+        ),
+      ),
+    );
   }
 
   Future<_SyncProcessOutcome> _applyResult(

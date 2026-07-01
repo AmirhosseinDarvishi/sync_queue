@@ -14,6 +14,7 @@ UI-friendly status streams.
 - Pair optimistic local changes with queue commit rollback.
 - Persist queue records behind a storage interface.
 - Send operations through an app-owned transport adapter.
+- Bound transport sends with an optional timeout.
 - Retry failed operations with exponential backoff.
 - Add jitter to retry delays to avoid retry bursts.
 - Honor transport-provided retry delays.
@@ -67,6 +68,7 @@ final engine = SyncEngine(
   transport: MyApiSyncTransport(),
   connectivity: connectivity,
   retryPolicy: const RetryPolicy(jitterFactor: 0.2),
+  sendTimeout: const Duration(seconds: 30),
 );
 
 await engine.enqueueUpdate(

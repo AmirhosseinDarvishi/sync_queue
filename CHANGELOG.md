@@ -1,6 +1,6 @@
 ## Unreleased
 
-* No unreleased changes.
+* Add optional transport send timeouts.
 
 ## 0.1.0-dev.3
 
