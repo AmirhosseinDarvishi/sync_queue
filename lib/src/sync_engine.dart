@@ -373,6 +373,50 @@ class SyncEngine {
     return pending;
   }
 
+  /// Returns interrupted syncing operations to the pending queue.
+  ///
+  /// Use this on app startup when a durable store may contain operations left
+  /// in `syncing` after the app or process stopped mid-send. Pass [staleAfter]
+  /// to avoid touching operations that may still belong to an active engine.
+  Future<List<SyncRecord>> recoverInterruptedOperations({
+    Duration? staleAfter,
+    bool syncImmediately = true,
+  }) async {
+    if (_isDraining) {
+      throw StateError('Cannot recover interrupted operations while draining.');
+    }
+
+    final now = _clock();
+    final records = await store.readAll();
+    final recovered = <SyncRecord>[];
+
+    for (final record in records) {
+      if (record.status != SyncStatus.syncing) {
+        continue;
+      }
+
+      if (staleAfter != null && record.updatedAt.add(staleAfter).isAfter(now)) {
+        continue;
+      }
+
+      final pending = record.copyWith(
+        status: SyncStatus.pending,
+        clearNextAttemptAt: true,
+        clearLastFailure: true,
+        clearConflict: true,
+        updatedAt: now,
+      );
+      await _saveAndEmit(pending);
+      recovered.add(pending);
+    }
+
+    if (syncImmediately && recovered.isNotEmpty) {
+      await drain();
+    }
+
+    return recovered;
+  }
+
   /// Resolves a conflicted operation using an app-provided decision.
   ///
   /// Returns `null` when the operation is no longer in the queue.

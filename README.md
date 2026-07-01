@@ -23,6 +23,7 @@ UI-friendly status streams.
 - Coalesce full drain requests that arrive while another drain is active.
 - Drain one due operation without draining unrelated work.
 - Drain due work for a specific entity.
+- Recover interrupted syncing operations after app restarts.
 - Pause automatic draining while offline.
 - Drain pending operations when connectivity returns.
 - Serialize operations and records for durable stores.
@@ -172,6 +173,10 @@ await engine.drainEntity(
 );
 
 await engine.drainOperation('operation-1');
+
+await engine.recoverInterruptedOperations(
+  staleAfter: const Duration(minutes: 5),
+);
 ```
 
 ## UI State

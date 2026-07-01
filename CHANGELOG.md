@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Add recovery for interrupted syncing operations after app restarts.
 * Improve dartdoc coverage for public sync, retry, storage, and conflict APIs.
 
 ## 0.1.0-dev.2

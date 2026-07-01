@@ -325,6 +325,138 @@ void main() {
     await engine.dispose();
   });
 
+  test('interrupted syncing operations can be recovered as pending', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(),
+        status: SyncStatus.syncing,
+        attempts: 2,
+        nextAttemptAt: now.add(const Duration(minutes: 1)),
+        lastFailure: const SyncFailure(message: 'Interrupted'),
+        conflict: const SyncConflict(message: 'Stale conflict'),
+        updatedAt: now.subtract(const Duration(minutes: 10)),
+      ),
+    );
+
+    final recovered = await engine.recoverInterruptedOperations(
+      syncImmediately: false,
+    );
+    final stored = (await store.readAll()).single;
+
+    expect(recovered, hasLength(1));
+    expect(recovered.single.status, SyncStatus.pending);
+    expect(recovered.single.attempts, 2);
+    expect(recovered.single.nextAttemptAt, isNull);
+    expect(recovered.single.lastFailure, isNull);
+    expect(recovered.single.conflict, isNull);
+    expect(recovered.single.updatedAt, now);
+    expect(stored.status, SyncStatus.pending);
+    expect(transport.sent, isEmpty);
+
+    await engine.dispose();
+  });
+
+  test(
+    'interrupted operation recovery can ignore fresh syncing records',
+    () async {
+      final now = DateTime.utc(2026, 7, 1, 12);
+      final store = InMemorySyncStore();
+      final transport = FakeTransport((_) async => const SyncResult.success());
+      final engine = SyncEngine(
+        store: store,
+        transport: transport,
+        clock: () => now,
+      );
+
+      await store.put(
+        SyncRecord(
+          operation: operation(id: 'old'),
+          status: SyncStatus.syncing,
+          updatedAt: now.subtract(const Duration(minutes: 10)),
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(id: 'fresh'),
+          status: SyncStatus.syncing,
+          updatedAt: now.subtract(const Duration(minutes: 1)),
+        ),
+      );
+
+      final recovered = await engine.recoverInterruptedOperations(
+        staleAfter: const Duration(minutes: 5),
+        syncImmediately: false,
+      );
+      final records = {
+        for (final record in await store.readAll())
+          record.operation.id: record.status,
+      };
+
+      expect(recovered.map((record) => record.operation.id), <String>['old']);
+      expect(records['old'], SyncStatus.pending);
+      expect(records['fresh'], SyncStatus.syncing);
+      expect(transport.sent, isEmpty);
+
+      await engine.dispose();
+    },
+  );
+
+  test('interrupted operation recovery can drain immediately', () async {
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await store.put(
+      SyncRecord(operation: operation(), status: SyncStatus.syncing),
+    );
+
+    final recovered = await engine.recoverInterruptedOperations();
+
+    expect(recovered, hasLength(1));
+    expect(recovered.single.status, SyncStatus.pending);
+    expect(transport.sent.map((operation) => operation.id), <String>['op-1']);
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+  });
+
+  test('interrupted operation recovery rejects active drains', () async {
+    final send = Completer<SyncResult>();
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) => send.future);
+    final engine = SyncEngine(store: store, transport: transport);
+    final syncingSeen = Completer<void>();
+    final subscription = engine.events.listen((record) {
+      if (record.status == SyncStatus.syncing && !syncingSeen.isCompleted) {
+        syncingSeen.complete();
+      }
+    });
+
+    await engine.enqueue(operation(), syncImmediately: false);
+    final drain = engine.drain();
+    await syncingSeen.future;
+
+    expect(
+      () => engine.recoverInterruptedOperations(syncImmediately: false),
+      throwsA(isA<StateError>()),
+    );
+
+    send.complete(const SyncResult.success());
+    await drain;
+
+    await subscription.cancel();
+    await engine.dispose();
+  });
+
   test('optimistic helper applies local change before queue commit', () async {
     var title = 'Old';
     final store = InMemorySyncStore();
