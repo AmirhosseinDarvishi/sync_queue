@@ -224,6 +224,54 @@ class SyncEngine {
     return enqueue(operation, syncImmediately: syncImmediately);
   }
 
+  /// Creates and enqueues a create mutation.
+  Future<SyncRecord> enqueueCreate({
+    required SyncEntityRef entity,
+    required Map<String, Object?> payload,
+    Map<String, Object?> headers = const <String, Object?>{},
+    bool syncImmediately = true,
+  }) {
+    return enqueueMutation(
+      entity: entity,
+      type: SyncOperationType.create,
+      payload: payload,
+      headers: headers,
+      syncImmediately: syncImmediately,
+    );
+  }
+
+  /// Creates and enqueues an update mutation.
+  Future<SyncRecord> enqueueUpdate({
+    required SyncEntityRef entity,
+    required Map<String, Object?> payload,
+    Map<String, Object?> headers = const <String, Object?>{},
+    bool syncImmediately = true,
+  }) {
+    return enqueueMutation(
+      entity: entity,
+      type: SyncOperationType.update,
+      payload: payload,
+      headers: headers,
+      syncImmediately: syncImmediately,
+    );
+  }
+
+  /// Creates and enqueues a delete mutation.
+  Future<SyncRecord> enqueueDelete({
+    required SyncEntityRef entity,
+    Map<String, Object?> payload = const <String, Object?>{},
+    Map<String, Object?> headers = const <String, Object?>{},
+    bool syncImmediately = true,
+  }) {
+    return enqueueMutation(
+      entity: entity,
+      type: SyncOperationType.delete,
+      payload: payload,
+      headers: headers,
+      syncImmediately: syncImmediately,
+    );
+  }
+
   /// Enqueues a mutation after removing older pending work for the same entity.
   ///
   /// Failed, conflicted, and syncing records are preserved because they need a

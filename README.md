@@ -7,6 +7,7 @@ UI-friendly status streams.
 ## Features
 
 - Queue create, update, delete, or custom operations.
+- Use create, update, and delete enqueue helpers for common mutations.
 - Keep only the latest pending mutation for noisy edit flows.
 - Update pending operations before they are sent.
 - Pair optimistic local changes with queue commit rollback.
@@ -70,6 +71,11 @@ await engine.enqueueMutation(
   entity: const SyncEntityRef(type: 'task', id: 'task-2'),
   type: SyncOperationType.update,
   payload: const {'title': 'Generated operation id'},
+);
+
+await engine.enqueueUpdate(
+  entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+  payload: const {'title': 'Shortcut mutation'},
 );
 
 await engine.enqueueLatestMutation(

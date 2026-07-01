@@ -135,6 +135,60 @@ void main() {
     await engine.dispose();
   });
 
+  test('enqueue create update delete helpers create typed mutations', () async {
+    var generatedId = 0;
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      operationIdGenerator: () => 'generated-${generatedId++}',
+      clock: () => now,
+    );
+    const task = SyncEntityRef(type: 'task', id: 'task-1');
+
+    await engine.enqueueCreate(
+      entity: task,
+      payload: const <String, Object?>{'title': 'Created'},
+      headers: const <String, Object?>{'source': 'form'},
+      syncImmediately: false,
+    );
+    await engine.enqueueUpdate(
+      entity: task,
+      payload: const <String, Object?>{'title': 'Updated'},
+      syncImmediately: false,
+    );
+    await engine.enqueueDelete(entity: task, syncImmediately: false);
+
+    final records = await store.readAll();
+
+    expect(transport.sent, isEmpty);
+    expect(records.map((record) => record.operation.id), <String>[
+      'generated-0',
+      'generated-1',
+      'generated-2',
+    ]);
+    expect(records.map((record) => record.operation.type), <SyncOperationType>[
+      SyncOperationType.create,
+      SyncOperationType.update,
+      SyncOperationType.delete,
+    ]);
+    expect(records[0].operation.payload, const <String, Object?>{
+      'title': 'Created',
+    });
+    expect(records[0].operation.headers, const <String, Object?>{
+      'source': 'form',
+    });
+    expect(records[1].operation.payload, const <String, Object?>{
+      'title': 'Updated',
+    });
+    expect(records[2].operation.payload, isEmpty);
+    expect(records.every((record) => record.operation.createdAt == now), true);
+
+    await engine.dispose();
+  });
+
   test('enqueue latest mutation replaces older pending work', () async {
     var generatedId = 0;
     final now = DateTime.utc(2026, 6, 30, 12);
