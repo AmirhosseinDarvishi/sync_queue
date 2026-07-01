@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Add a helper for reading the next runnable retry time.
 * Add optional transport send timeouts.
 
 ## 0.1.0-dev.3

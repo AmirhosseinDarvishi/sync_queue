@@ -20,6 +20,7 @@ UI-friendly status streams.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Schedule retry timers only for runnable queued work.
+- Read the next runnable retry time for custom schedulers.
 - Inspect drain summaries after each sync pass.
 - Limit drain passes for batched background sync.
 - Preserve operation order for each entity during drain passes.
@@ -189,6 +190,8 @@ await engine.drainOperation('operation-1');
 await engine.recoverInterruptedOperations(
   staleAfter: const Duration(minutes: 5),
 );
+
+final nextRetryAt = await engine.readNextRetryAt();
 ```
 
 ## UI State

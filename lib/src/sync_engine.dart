@@ -195,6 +195,14 @@ class SyncEngine {
     );
   }
 
+  /// Reads the next runnable retry time for custom schedulers.
+  ///
+  /// Returns `null` when there are no retryable pending records that are not
+  /// blocked by older work for the same entity.
+  Future<DateTime?> readNextRetryAt() {
+    return _readNextRunnableRetryAt();
+  }
+
   /// Emits initial sync state, then refreshes when queue or engine state changes.
   Stream<SyncStateSnapshot> watchSyncState() async* {
     yield await readSyncState();

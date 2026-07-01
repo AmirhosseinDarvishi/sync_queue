@@ -2802,6 +2802,82 @@ void main() {
     await engine.dispose();
   });
 
+  test('read next retry at returns earliest runnable retry', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'second', createdAt: now),
+        nextAttemptAt: now.add(const Duration(seconds: 20)),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'first',
+          entity: const SyncEntityRef(type: 'task', id: 'task-2'),
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        nextAttemptAt: now.add(const Duration(seconds: 5)),
+      ),
+    );
+
+    expect(await engine.readNextRetryAt(), now.add(const Duration(seconds: 5)));
+
+    await engine.dispose();
+  });
+
+  test('read next retry at ignores retries blocked by older work', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    const task = SyncEntityRef(type: 'task', id: 'task-1');
+    const invoice = SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task, createdAt: now),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Needs attention'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'task-retry',
+          entity: task,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        nextAttemptAt: now.add(const Duration(seconds: 1)),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'invoice-retry',
+          entity: invoice,
+          createdAt: now.add(const Duration(seconds: 2)),
+        ),
+        nextAttemptAt: now.add(const Duration(seconds: 10)),
+      ),
+    );
+
+    expect(
+      await engine.readNextRetryAt(),
+      now.add(const Duration(seconds: 10)),
+    );
+
+    await engine.dispose();
+  });
+
   test('watch sync state emits queue and engine lifecycle changes', () async {
     final store = InMemorySyncStore();
     final connectivity = ManualSyncConnectivity(SyncConnectivityStatus.offline);
