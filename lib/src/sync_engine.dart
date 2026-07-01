@@ -67,6 +67,7 @@ class SyncEngine {
   Timer? _retryTimer;
   DateTime? _scheduledRetryAt;
   var _isDraining = false;
+  var _needsDrainRerun = false;
   var _isDisposed = false;
 
   /// Emits every record transition processed by this engine.
@@ -345,7 +346,11 @@ class SyncEngine {
 
   /// Sends due operations until the queue is caught up for the current moment.
   Future<SyncDrainResult> drain({bool force = false}) async {
-    return _drainMatching(force: force, include: (_) => true);
+    return _drainMatching(
+      force: force,
+      include: (_) => true,
+      rerunWhenBusy: true,
+    );
   }
 
   /// Sends due operations for one entity without draining unrelated work.
@@ -373,12 +378,17 @@ class SyncEngine {
   Future<SyncDrainResult> _drainMatching({
     required bool force,
     required bool Function(SyncRecord record) include,
+    bool rerunWhenBusy = false,
   }) async {
     if (_isDisposed) {
       return const SyncDrainResult.skipped(SyncDrainStatus.skippedDisposed);
     }
 
     if (_isDraining) {
+      if (rerunWhenBusy) {
+        _needsDrainRerun = true;
+      }
+
       return const SyncDrainResult.skipped(
         SyncDrainStatus.skippedAlreadyDraining,
       );
@@ -390,30 +400,41 @@ class SyncEngine {
 
     _isDraining = true;
     try {
-      final dueAt = _clock();
-      final records = (await store.readPending(
-        dueAt: dueAt,
-      )).where(include).toList(growable: false);
       var succeededCount = 0;
       var retryScheduledCount = 0;
       var failedCount = 0;
       var conflictedCount = 0;
+      var processedCount = 0;
+      var currentInclude = include;
 
-      for (final record in records) {
-        switch (await _process(record)) {
-          case _SyncProcessOutcome.succeeded:
-            succeededCount += 1;
-          case _SyncProcessOutcome.retryScheduled:
-            retryScheduledCount += 1;
-          case _SyncProcessOutcome.failed:
-            failedCount += 1;
-          case _SyncProcessOutcome.conflicted:
-            conflictedCount += 1;
+      do {
+        _needsDrainRerun = false;
+        final dueAt = _clock();
+        final records = (await store.readPending(
+          dueAt: dueAt,
+        )).where(currentInclude).toList(growable: false);
+        processedCount += records.length;
+
+        for (final record in records) {
+          switch (await _process(record)) {
+            case _SyncProcessOutcome.succeeded:
+              succeededCount += 1;
+            case _SyncProcessOutcome.retryScheduled:
+              retryScheduledCount += 1;
+            case _SyncProcessOutcome.failed:
+              failedCount += 1;
+            case _SyncProcessOutcome.conflicted:
+              conflictedCount += 1;
+          }
         }
-      }
+
+        if (_needsDrainRerun) {
+          currentInclude = (_) => true;
+        }
+      } while (_needsDrainRerun && !_isDisposed);
 
       return SyncDrainResult.completed(
-        processedCount: records.length,
+        processedCount: processedCount,
         succeededCount: succeededCount,
         retryScheduledCount: retryScheduledCount,
         failedCount: failedCount,

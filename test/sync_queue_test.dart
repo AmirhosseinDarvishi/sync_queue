@@ -286,6 +286,44 @@ void main() {
     await engine.dispose();
   });
 
+  test(
+    'drain reruns when another full drain is requested while active',
+    () async {
+      final now = DateTime.utc(2026, 7, 1, 12);
+      final store = InMemorySyncStore();
+      late SyncEngine engine;
+      var enqueuedSecond = false;
+      final transport = FakeTransport((sent) async {
+        if (sent.id == 'first' && !enqueuedSecond) {
+          enqueuedSecond = true;
+          await engine.enqueue(
+            operation(
+              id: 'second',
+              createdAt: now.add(const Duration(seconds: 1)),
+            ),
+          );
+        }
+
+        return const SyncResult.success();
+      });
+      engine = SyncEngine(store: store, transport: transport, clock: () => now);
+
+      await engine.enqueue(operation(id: 'first'), syncImmediately: false);
+      final result = await engine.drain();
+
+      expect(result.status, SyncDrainStatus.completed);
+      expect(result.processedCount, 2);
+      expect(result.succeededCount, 2);
+      expect(transport.sent.map((operation) => operation.id), <String>[
+        'first',
+        'second',
+      ]);
+      expect(await store.readAll(), isEmpty);
+
+      await engine.dispose();
+    },
+  );
+
   test('drain entity sends only due work for one entity', () async {
     final now = DateTime.utc(2026, 7, 1, 12);
     final task = const SyncEntityRef(type: 'task', id: 'task-1');

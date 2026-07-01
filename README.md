@@ -15,6 +15,7 @@ UI-friendly status streams.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
+- Coalesce full drain requests that arrive while another drain is active.
 - Drain one due operation without draining unrelated work.
 - Drain due work for a specific entity.
 - Pause automatic draining while offline.
