@@ -1,5 +1,6 @@
 ## Unreleased
 
+* Schedule retry timers only for runnable queued work.
 * Reject duplicate operation ids before queued work can be overwritten.
 * Preserve per-entity operation order during drain passes.
 * Add recovery for interrupted syncing operations after app restarts.

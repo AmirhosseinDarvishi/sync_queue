@@ -963,6 +963,94 @@ void main() {
     await engine.dispose();
   });
 
+  test('retry timer ignores blocked newer entity retries', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final timers = FakeTimerFactory();
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final store = InMemorySyncStore();
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'failed', entity: task, createdAt: now),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Needs attention'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'newer-retry',
+          entity: task,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        nextAttemptAt: now.add(const Duration(seconds: 1)),
+        lastFailure: const SyncFailure(message: 'Try later'),
+      ),
+    );
+    final engine = SyncEngine(
+      store: store,
+      transport: FakeTransport((_) async => const SyncResult.success()),
+      timerFactory: timers.call,
+      clock: () => now,
+    );
+
+    await Future<void>.delayed(Duration.zero);
+
+    expect(timers.timers, isEmpty);
+    await engine.dispose();
+  });
+
+  test(
+    'retry timer can skip blocked entities and schedule runnable work',
+    () async {
+      final now = DateTime.utc(2026, 7, 1, 12);
+      final timers = FakeTimerFactory();
+      final task = const SyncEntityRef(type: 'task', id: 'task-1');
+      final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+      final store = InMemorySyncStore();
+      await store.put(
+        SyncRecord(
+          operation: operation(id: 'task-failed', entity: task, createdAt: now),
+          status: SyncStatus.failed,
+          lastFailure: const SyncFailure(message: 'Needs attention'),
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'task-newer-retry',
+            entity: task,
+            createdAt: now.add(const Duration(seconds: 1)),
+          ),
+          nextAttemptAt: now.add(const Duration(seconds: 1)),
+          lastFailure: const SyncFailure(message: 'Try later'),
+        ),
+      );
+      await store.put(
+        SyncRecord(
+          operation: operation(
+            id: 'invoice-retry',
+            entity: invoice,
+            createdAt: now.add(const Duration(seconds: 2)),
+          ),
+          nextAttemptAt: now.add(const Duration(seconds: 5)),
+          lastFailure: const SyncFailure(message: 'Try later'),
+        ),
+      );
+      final engine = SyncEngine(
+        store: store,
+        transport: FakeTransport((_) async => const SyncResult.success()),
+        timerFactory: timers.call,
+        clock: () => now,
+      );
+
+      await Future<void>.delayed(Duration.zero);
+
+      expect(timers.timers, hasLength(1));
+      expect(timers.timers.single.duration, const Duration(seconds: 5));
+      await engine.dispose();
+    },
+  );
+
   test('watch engine state emits drain lifecycle snapshots', () async {
     final store = InMemorySyncStore();
     final started = Completer<void>();

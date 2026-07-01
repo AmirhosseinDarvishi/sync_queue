@@ -18,6 +18,7 @@ UI-friendly status streams.
 - Add jitter to retry delays to avoid retry bursts.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
+- Schedule retry timers only for runnable queued work.
 - Inspect drain summaries after each sync pass.
 - Limit drain passes for batched background sync.
 - Preserve operation order for each entity during drain passes.

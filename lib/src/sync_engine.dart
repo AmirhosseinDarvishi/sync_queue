@@ -1016,23 +1016,7 @@ class SyncEngine {
       return;
     }
 
-    final records = await store.readAll();
-    DateTime? nextAttemptAt;
-
-    for (final record in records) {
-      if (record.status != SyncStatus.pending) {
-        continue;
-      }
-
-      final attemptAt = record.nextAttemptAt;
-      if (attemptAt == null) {
-        continue;
-      }
-
-      if (nextAttemptAt == null || attemptAt.isBefore(nextAttemptAt)) {
-        nextAttemptAt = attemptAt;
-      }
-    }
+    final nextAttemptAt = await _readNextRunnableRetryAt();
 
     if (nextAttemptAt == null) {
       _cancelRetryTimer();
@@ -1040,6 +1024,40 @@ class SyncEngine {
     }
 
     _scheduleRetryAt(nextAttemptAt);
+  }
+
+  Future<DateTime?> _readNextRunnableRetryAt() async {
+    final records = await store.readAll();
+    final blockedEntities = <SyncEntityRef>{};
+    DateTime? nextAttemptAt;
+
+    for (final record in records) {
+      final entity = record.operation.entity;
+      if (blockedEntities.contains(entity)) {
+        continue;
+      }
+
+      switch (record.status) {
+        case SyncStatus.pending:
+          blockedEntities.add(entity);
+          final attemptAt = record.nextAttemptAt;
+          if (attemptAt == null) {
+            continue;
+          }
+
+          if (nextAttemptAt == null || attemptAt.isBefore(nextAttemptAt)) {
+            nextAttemptAt = attemptAt;
+          }
+        case SyncStatus.syncing:
+        case SyncStatus.failed:
+        case SyncStatus.conflicted:
+          blockedEntities.add(entity);
+        case SyncStatus.synced:
+          break;
+      }
+    }
+
+    return nextAttemptAt;
   }
 
   void _scheduleRetryAt(DateTime retryAt) {
