@@ -1224,6 +1224,131 @@ void main() {
     await engine.dispose();
   });
 
+  test('failed operations can be discarded in bulk', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+    final emitted = engine.events
+        .map((record) => '${record.operation.id}:${record.status.name}')
+        .take(2);
+    final expectation = expectLater(
+      emitted,
+      emitsInOrder(<String>['task-failed:synced', 'invoice-failed:synced']),
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task, createdAt: now),
+        status: SyncStatus.failed,
+        attempts: 2,
+        lastFailure: const SyncFailure(message: 'Task failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'invoice-failed',
+          entity: invoice,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        status: SyncStatus.failed,
+        attempts: 3,
+        lastFailure: const SyncFailure(message: 'Invoice failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'pending-work',
+          createdAt: now.add(const Duration(seconds: 2)),
+        ),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'conflicted-work',
+          createdAt: now.add(const Duration(seconds: 3)),
+        ),
+        status: SyncStatus.conflicted,
+      ),
+    );
+
+    final discarded = await engine.discardFailedOperations();
+
+    expect(discarded.map((record) => record.operation.id), <String>[
+      'task-failed',
+      'invoice-failed',
+    ]);
+    expect(
+      discarded.map((record) => record.status),
+      everyElement(SyncStatus.synced),
+    );
+    expect(discarded.every((record) => record.lastFailure == null), true);
+    expect(transport.sent, isEmpty);
+    await expectation;
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+    expect(
+      records.keys,
+      unorderedEquals(<String>['pending-work', 'conflicted-work']),
+    );
+    expect(records['pending-work']?.status, SyncStatus.pending);
+    expect(records['conflicted-work']?.status, SyncStatus.conflicted);
+
+    await engine.dispose();
+  });
+
+  test('failed operation bulk discard can be scoped to one entity', () async {
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task),
+        status: SyncStatus.failed,
+        attempts: 4,
+        lastFailure: const SyncFailure(message: 'Task failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'invoice-failed', entity: invoice),
+        status: SyncStatus.failed,
+        attempts: 2,
+        lastFailure: const SyncFailure(message: 'Invoice failed'),
+      ),
+    );
+
+    final discarded = await engine.discardFailedOperations(entity: task);
+
+    expect(discarded, hasLength(1));
+    expect(discarded.single.operation.id, 'task-failed');
+    expect(discarded.single.status, SyncStatus.synced);
+    expect(discarded.single.lastFailure, isNull);
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+    expect(records.keys, <String>['invoice-failed']);
+    expect(records['invoice-failed']?.status, SyncStatus.failed);
+    expect(records['invoice-failed']?.attempts, 2);
+
+    await engine.dispose();
+  });
+
   test('discard operation rejects syncing records', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());

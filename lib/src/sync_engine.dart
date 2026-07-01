@@ -407,6 +407,40 @@ class SyncEngine {
     return discarded;
   }
 
+  /// Removes failed operations without sending them.
+  ///
+  /// Pass [entity] to discard only failed operations for one domain entity.
+  Future<List<SyncRecord>> discardFailedOperations({
+    SyncEntityRef? entity,
+  }) async {
+    final records = await store.readAll();
+    final discarded = <SyncRecord>[];
+
+    for (final record in records) {
+      if (record.status != SyncStatus.failed) {
+        continue;
+      }
+
+      if (entity != null && record.operation.entity != entity) {
+        continue;
+      }
+
+      final synced = record.copyWith(
+        status: SyncStatus.synced,
+        clearNextAttemptAt: true,
+        clearLastFailure: true,
+        clearConflict: true,
+        updatedAt: _clock(),
+      );
+      await store.delete(record.operation.id);
+      _emit(synced);
+      discarded.add(synced);
+    }
+
+    await _scheduleNextPendingDrain();
+    return discarded;
+  }
+
   /// Removes all pending operations for [entity] without sending them.
   ///
   /// Failed, conflicted, and syncing records are preserved because they need a
