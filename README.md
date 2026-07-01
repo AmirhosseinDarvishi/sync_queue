@@ -47,6 +47,9 @@ This first version intentionally keeps storage and networking abstract. Use the
 in-memory store for tests and prototypes, then add a real adapter for your app's
 database.
 
+See `example/main.dart` for a complete fake API flow with offline queuing,
+optimistic updates, failed-operation retry, and conflict resolution.
+
 ## Usage
 
 ```dart

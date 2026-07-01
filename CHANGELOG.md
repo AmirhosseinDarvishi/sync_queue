@@ -27,6 +27,7 @@
 * Add combined sync state snapshots for UI.
 * Add create, update, and delete enqueue helpers.
 * Add filtered record read and watch helpers.
+* Add a runnable fake API example for common sync flows.
 
 ## 0.1.0-dev.1
 
