@@ -339,6 +339,47 @@ void main() {
     await engine.dispose();
   });
 
+  test('drain operation sends only one due operation', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await engine.enqueue(operation(id: 'target'), syncImmediately: false);
+    await engine.enqueue(operation(id: 'other-due'), syncImmediately: false);
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'future-target',
+          createdAt: DateTime.utc(2026, 7, 1, 12, 1),
+        ),
+        nextAttemptAt: now.add(const Duration(minutes: 1)),
+      ),
+    );
+
+    final result = await engine.drainOperation('target');
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+
+    expect(result.status, SyncDrainStatus.completed);
+    expect(result.processedCount, 1);
+    expect(result.succeededCount, 1);
+    expect(transport.sent.map((operation) => operation.id), <String>['target']);
+    expect(
+      records.keys,
+      unorderedEquals(<String>['other-due', 'future-target']),
+    );
+    expect(records['other-due']?.status, SyncStatus.pending);
+    expect(records['future-target']?.status, SyncStatus.pending);
+
+    await engine.dispose();
+  });
+
   test('retryable failures are rescheduled with backoff', () async {
     var now = DateTime(2026);
     final store = InMemorySyncStore();

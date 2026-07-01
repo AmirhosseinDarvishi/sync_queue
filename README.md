@@ -15,6 +15,7 @@ UI-friendly status streams.
 - Honor transport-provided retry delays.
 - Automatically retry due operations on schedule.
 - Inspect drain summaries after each sync pass.
+- Drain one due operation without draining unrelated work.
 - Drain due work for a specific entity.
 - Pause automatic draining while offline.
 - Drain pending operations when connectivity returns.
@@ -75,6 +76,8 @@ print(drain.succeededCount);
 await engine.drainEntity(
   const SyncEntityRef(type: 'task', id: 'task-1'),
 );
+
+await engine.drainOperation('operation-1');
 
 engine.watchEntity(const SyncEntityRef(type: 'task', id: 'task-1')).listen(
   (record) {

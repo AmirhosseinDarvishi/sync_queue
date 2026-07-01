@@ -16,6 +16,7 @@
 * Add entity-scoped pending discard support.
 * Add entity record inspection helpers.
 * Add entity-scoped drain support.
+* Add operation-scoped drain support.
 
 ## 0.1.0-dev.1
 

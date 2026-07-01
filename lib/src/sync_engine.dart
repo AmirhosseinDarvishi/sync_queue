@@ -359,6 +359,17 @@ class SyncEngine {
     );
   }
 
+  /// Sends one due operation without draining unrelated work.
+  Future<SyncDrainResult> drainOperation(
+    String operationId, {
+    bool force = false,
+  }) async {
+    return _drainMatching(
+      force: force,
+      include: (record) => record.operation.id == operationId,
+    );
+  }
+
   Future<SyncDrainResult> _drainMatching({
     required bool force,
     required bool Function(SyncRecord record) include,
