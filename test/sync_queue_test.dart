@@ -1007,6 +1007,180 @@ void main() {
     await engine.dispose();
   });
 
+  test('failed operations can be retried in bulk', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+    final emitted = engine.events
+        .map((record) => '${record.operation.id}:${record.status.name}')
+        .take(2);
+    final expectation = expectLater(
+      emitted,
+      emitsInOrder(<String>['task-failed:pending', 'invoice-failed:pending']),
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task, createdAt: now),
+        status: SyncStatus.failed,
+        attempts: 2,
+        lastFailure: const SyncFailure(message: 'Task failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'invoice-failed',
+          entity: invoice,
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        status: SyncStatus.failed,
+        attempts: 3,
+        nextAttemptAt: now.add(const Duration(minutes: 5)),
+        lastFailure: const SyncFailure(message: 'Invoice failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'pending-work',
+          createdAt: now.add(const Duration(seconds: 2)),
+        ),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'conflicted-work',
+          createdAt: now.add(const Duration(seconds: 3)),
+        ),
+        status: SyncStatus.conflicted,
+      ),
+    );
+
+    final retried = await engine.retryFailedOperations(syncImmediately: false);
+
+    expect(retried.map((record) => record.operation.id), <String>[
+      'task-failed',
+      'invoice-failed',
+    ]);
+    expect(
+      retried.every((record) => record.status == SyncStatus.pending),
+      true,
+    );
+    expect(retried.every((record) => record.attempts == 0), true);
+    expect(retried.every((record) => record.lastFailure == null), true);
+    expect(retried.every((record) => record.nextAttemptAt == null), true);
+    expect(transport.sent, isEmpty);
+    await expectation;
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+    expect(records['task-failed']?.status, SyncStatus.pending);
+    expect(records['invoice-failed']?.status, SyncStatus.pending);
+    expect(records['pending-work']?.status, SyncStatus.pending);
+    expect(records['conflicted-work']?.status, SyncStatus.conflicted);
+
+    await engine.dispose();
+  });
+
+  test('failed operation bulk retry can be scoped to one entity', () async {
+    final task = const SyncEntityRef(type: 'task', id: 'task-1');
+    final invoice = const SyncEntityRef(type: 'invoice', id: 'invoice-1');
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(store: store, transport: transport);
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'task-failed', entity: task),
+        status: SyncStatus.failed,
+        attempts: 4,
+        lastFailure: const SyncFailure(message: 'Task failed'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'invoice-failed', entity: invoice),
+        status: SyncStatus.failed,
+        attempts: 2,
+        lastFailure: const SyncFailure(message: 'Invoice failed'),
+      ),
+    );
+
+    final retried = await engine.retryFailedOperations(
+      entity: task,
+      resetAttempts: false,
+      syncImmediately: false,
+    );
+
+    expect(retried, hasLength(1));
+    expect(retried.single.operation.id, 'task-failed');
+    expect(retried.single.status, SyncStatus.pending);
+    expect(retried.single.attempts, 4);
+    expect(retried.single.lastFailure, isNull);
+
+    final records = {
+      for (final record in await store.readAll()) record.operation.id: record,
+    };
+    expect(records['task-failed']?.status, SyncStatus.pending);
+    expect(records['invoice-failed']?.status, SyncStatus.failed);
+    expect(records['invoice-failed']?.attempts, 2);
+
+    await engine.dispose();
+  });
+
+  test('failed operation bulk retry can drain immediately', () async {
+    final now = DateTime.utc(2026, 7, 1, 12);
+    final store = InMemorySyncStore();
+    final transport = FakeTransport((_) async => const SyncResult.success());
+    final engine = SyncEngine(
+      store: store,
+      transport: transport,
+      clock: () => now,
+    );
+
+    await store.put(
+      SyncRecord(
+        operation: operation(id: 'failed-1', createdAt: now),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Failed 1'),
+      ),
+    );
+    await store.put(
+      SyncRecord(
+        operation: operation(
+          id: 'failed-2',
+          createdAt: now.add(const Duration(seconds: 1)),
+        ),
+        status: SyncStatus.failed,
+        lastFailure: const SyncFailure(message: 'Failed 2'),
+      ),
+    );
+
+    final retried = await engine.retryFailedOperations();
+
+    expect(retried.map((record) => record.operation.id), <String>[
+      'failed-1',
+      'failed-2',
+    ]);
+    expect(transport.sent.map((operation) => operation.id), <String>[
+      'failed-1',
+      'failed-2',
+    ]);
+    expect(await store.readAll(), isEmpty);
+
+    await engine.dispose();
+  });
+
   test('failed operation retry rejects non-failed records', () async {
     final store = InMemorySyncStore();
     final transport = FakeTransport((_) async => const SyncResult.success());

@@ -341,6 +341,45 @@ class SyncEngine {
     return pending;
   }
 
+  /// Returns failed operations to the pending queue for a bulk retry action.
+  ///
+  /// Pass [entity] to retry only failed operations for one domain entity.
+  Future<List<SyncRecord>> retryFailedOperations({
+    SyncEntityRef? entity,
+    bool resetAttempts = true,
+    bool syncImmediately = true,
+  }) async {
+    final records = await store.readAll();
+    final retried = <SyncRecord>[];
+
+    for (final record in records) {
+      if (record.status != SyncStatus.failed) {
+        continue;
+      }
+
+      if (entity != null && record.operation.entity != entity) {
+        continue;
+      }
+
+      final pending = record.copyWith(
+        status: SyncStatus.pending,
+        attempts: resetAttempts ? 0 : record.attempts,
+        clearNextAttemptAt: true,
+        clearLastFailure: true,
+        clearConflict: true,
+        updatedAt: _clock(),
+      );
+      await _saveAndEmit(pending);
+      retried.add(pending);
+    }
+
+    if (syncImmediately && retried.isNotEmpty) {
+      await drain();
+    }
+
+    return retried;
+  }
+
   /// Removes a queued operation without sending it.
   ///
   /// Returns a transient synced record for UI streams, or `null` when the

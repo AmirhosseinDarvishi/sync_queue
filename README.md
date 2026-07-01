@@ -29,6 +29,7 @@ UI-friendly status streams.
 - Let JSON storage adapters provide optimized pending queries.
 - Surface conflicts instead of hiding them.
 - Retry failed operations after user action.
+- Retry all failed operations or only failed work for one entity.
 - Discard queued operations before they are sent.
 - Discard pending work for a specific entity.
 - Watch per-entity sync status from Flutter UI.
@@ -139,6 +140,10 @@ await engine.resolveConflict(
 await engine.retryFailedOperation(
   'operation-1',
   payload: {'title': 'Try again'},
+);
+
+await engine.retryFailedOperations(
+  entity: const SyncEntityRef(type: 'task', id: 'task-1'),
 );
 
 await engine.discardOperation('operation-1');

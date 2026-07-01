@@ -22,6 +22,7 @@
 * Add optimistic update helper with commit rollback.
 * Add engine lifecycle state snapshots for drain UI.
 * Add bounded drain batches with continuation hints.
+* Add bulk failed-operation retry support.
 
 ## 0.1.0-dev.1
 
